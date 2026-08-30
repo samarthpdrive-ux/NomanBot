@@ -345,7 +345,7 @@ def _get_reseller_credentials(reseller_id: str | None = None) -> dict:
 # ╚══════════════════════════════════════════════════════════════╝
 
 async def _show_product_source_selection(target: Message | CallbackQuery, state: FSMContext):
-    """Render the initial product source selection screen."""
+    """Render the initial product source selection screen cleanly."""
     await state.clear()
     await state.set_state(AddProduct.source)
 
@@ -386,7 +386,10 @@ async def _show_product_source_selection(target: Message | CallbackQuery, state:
     )
 
     if isinstance(target, CallbackQuery):
-        await target.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+        try:
+            await target.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            await target.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
         await target.answer()
     else:
         await target.answer(text, parse_mode="HTML", reply_markup=keyboard)
@@ -424,16 +427,20 @@ async def add_product_own(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(AddProduct.name)
 
-    await callback.message.answer(
+    text = (
         "╔══════════════════════════════╗\n"
         "║  🏠 OWN PRODUCT              ║\n"
         "╚══════════════════════════════╝\n\n"
         "✏️ <b>Step 1/10: Product Name</b>\n\n"
         f"{_divider('─')}\n\n"
         "Send the product name.\n\n"
-        "<i>Example: Gemini Advanced 1 Month</i>",
-        parse_mode="HTML"
+        "<i>Example: Gemini Advanced 1 Month</i>"
     )
+
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
 
@@ -470,7 +477,10 @@ async def add_product_reseller(callback: CallbackQuery, state: FSMContext):
                 ]
             ]
         )
-        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+        try:
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
         await callback.answer()
         return
 
@@ -498,7 +508,11 @@ async def add_product_reseller(callback: CallbackQuery, state: FSMContext):
         "Choose a provider to import products from:\n"
     )
 
-    await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    
     await callback.answer()
 
 
@@ -820,7 +834,7 @@ async def reseller_product_selected(callback: CallbackQuery, state: FSMContext):
 
     stock_display = f"{reseller_stock}" if reseller_stock < 999999 else "🟢 In Stock"
 
-    await callback.message.answer(
+    text = (
         f"🔗 <b>Selected Reseller Product:</b>\n"
         f"<b>{_esc(reseller_product_name)}</b>\n\n"
         f"💰 <b>Provider Cost:</b> ${reseller_cost:.2f}\n"
@@ -830,9 +844,13 @@ async def reseller_product_selected(callback: CallbackQuery, state: FSMContext):
         f"{_divider('─')}\n\n"
         f"💰 <b>Enter your selling price (USD):</b>\n\n"
         f"<i>This is the price your customers will pay in your store.</i>\n"
-        f"<i>Example: 0.99 or 1.50</i>",
-        parse_mode="HTML"
+        f"<i>Example: 0.99 or 1.50</i>"
     )
+
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML")
 
     await callback.answer()
 
