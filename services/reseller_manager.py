@@ -1,9 +1,7 @@
-# services/reseller_manager.py
-
 """
 Reseller API manager supporting multi-provider architecture.
 
-Compatible with Excalibur Shop Bot API, EM Store, and Generic REST Providers:
+Compatible with Excalibur Shop Bot API, EM Store, Canboso Telegram Buyer API, and Generic REST Providers:
 - Products: GET
 - Balance: GET
 - Order: POST/GET
@@ -122,10 +120,12 @@ class ResellerManager:
                 or "ssondigitalworks" in self.base_url
         )
 
-        if is_em_store:
+        if raw_auth_type:
+            self.auth_type = raw_auth_type
+        elif is_em_store:
             self.auth_type = "bearer"
         else:
-            self.auth_type = raw_auth_type or "header"
+            self.auth_type = "header"
 
         self.auth_header_name = str(
             self.config_dict.get("auth_header_name")
@@ -307,7 +307,6 @@ class ResellerManager:
                 sanitized_url = self._sanitize_text(url)
 
                 if response.status >= 400:
-                    # Cleanly extract JSON detail field to suppress internal API details
                     clean_detail = sanitized_text
                     try:
                         parsed_json = json.loads(text)
@@ -321,7 +320,6 @@ class ResellerManager:
                     except Exception:
                         pass
 
-                    # Formulate clean, non-technical error message
                     err_msg = f"Unable to process {feature_name}: {clean_detail}"
 
                     raise ResellerAPIError(
@@ -423,6 +421,11 @@ class ResellerManager:
                     if key in response and isinstance(response[key], list):
                         raw_list = response[key]
                         break
+                if not raw_list and "success" in response:
+                    for key, val in response.items():
+                        if isinstance(val, list):
+                            raw_list = val
+                            break
 
         if not isinstance(raw_list, list):
             raise ResellerAPIError(
