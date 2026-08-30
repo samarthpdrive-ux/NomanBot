@@ -346,6 +346,14 @@ class ResellerManager:
                     if "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower():
                         err_msg = f"Rain Deals API error (HTTP {response.status}): {clean_detail}"
 
+                    logger.error(
+                        "Reseller API Request Failed | provider_id=%s | url=%s | status=%s | response=%s",
+                        self.provider_id,
+                        sanitized_url,
+                        response.status,
+                        sanitized_text[:500]
+                    )
+
                     raise ResellerAPIError(
                         message=err_msg,
                         status_code=response.status,
@@ -365,11 +373,13 @@ class ResellerManager:
         except ResellerAPIError:
             raise
         except aiohttp.ClientError as e:
+            logger.error("Reseller Network Client Error | provider_id=%s | error=%s", self.provider_id, str(e))
             raise ResellerAPIError(
                 message=f"Provider Connection Error: Unable to reach target service.",
                 provider_id=self.provider_id,
             )
         except Exception as e:
+            logger.error("Reseller System Error | provider_id=%s | error=%s", self.provider_id, str(e))
             raise ResellerAPIError(
                 message=f"System Error: Request processing failed.",
                 provider_id=self.provider_id,
@@ -807,4 +817,4 @@ class ResellerManager:
                 "message": f"Unexpected error connecting to provider: {str(err)}",
             }
 
-    verify_connection = test_connection
+        verify_connection = test_connection
