@@ -119,9 +119,12 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
+        is_canboso = "canboso.com" in self.base_url.lower()
 
         if raw_auth_type:
             self.auth_type = raw_auth_type
+        elif is_canboso:
+            self.auth_type = "query"
         elif is_em_store:
             self.auth_type = "bearer"
         else:
@@ -136,7 +139,7 @@ class ResellerManager:
         self.auth_query_param = str(
             self.config_dict.get("auth_query_param")
             or getattr(self.config, "auth_query_param", None)
-            or "key"
+            or ("key" if is_canboso else "key")
         )
 
     def __repr__(self) -> str:
@@ -214,6 +217,15 @@ class ResellerManager:
             elif isinstance(ep_val, str):
                 return ep_val, default_method
 
+        # Canboso global sensible defaults if base_url matches and no explicit override given
+        if "canboso.com" in self.base_url.lower():
+            if feature == "products":
+                return "/api/v2/telegram-buyer/products", default_method
+            elif feature == "balance":
+                return "/api/v2/telegram-buyer/balance", default_method
+            elif feature == "order":
+                return "/api/v2/telegram-buyer/purchase", default_method
+
         return default_endpoint, default_method
 
     def _get_mapping(self, feature: str, default: Any = None) -> Any:
@@ -227,6 +239,17 @@ class ResellerManager:
             if feature in mappings:
                 return mappings[feature]
             return mappings
+
+        # Default fallback mapping for Canboso if none provided
+        if "canboso.com" in self.base_url.lower() and feature == "products":
+            return {
+                "service_id": "productId",
+                "name": "name",
+                "price": "price.amount",
+                "stock": "availability.available",
+                "description": "description",
+                "category": "productType"
+            }
 
         return default
 
@@ -312,8 +335,8 @@ class ResellerManager:
                         parsed_json = json.loads(text)
                         if isinstance(parsed_json, dict):
                             clean_detail = (
-                                    parsed_json.get("detail")
-                                    or parsed_json.get("message")
+                                    parsed_json.get("message")
+                                    or parsed_json.get("detail")
                                     or parsed_json.get("error")
                                     or sanitized_text
                             )
@@ -357,7 +380,9 @@ class ResellerManager:
 
     async def get_me(self) -> dict[str, Any]:
         """Fetch account metadata from provider."""
-        endpoint, method = self._get_endpoint_and_method("me", "/api/v1/me", "GET")
+        is_canboso = "canboso.com" in self.base_url.lower()
+        default_ep = "/api/v2/telegram-buyer/balance" if is_canboso else "/api/v1/me"
+        endpoint, method = self._get_endpoint_and_method("me", default_ep, "GET")
         res = await self._request(method, endpoint, feature_name="me")
         return res if isinstance(res, dict) else {"response": res}
 
@@ -367,7 +392,15 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        default_ep = "?action=balance" if is_em_store else "/api/v1/me"
+        is_canboso = "canboso.com" in self.base_url.lower()
+
+        if is_canboso:
+            default_ep = "/api/v2/telegram-buyer/balance"
+        elif is_em_store:
+            default_ep = "?action=balance"
+        else:
+            default_ep = "/api/v1/me"
+
         endpoint, method = self._get_endpoint_and_method("balance", default_ep, "GET")
 
         data = await self._request(method, endpoint, feature_name="balance")
@@ -383,8 +416,9 @@ class ResellerManager:
             val = self._extract_value(data, balance_key)
 
         if val is None and isinstance(data, dict):
+            # Also check Canboso structure like wallet balance or nested properties if any
             for key in (
-            "balance", "funds", "credits", "wallet", "amount", "user_balance", "user.balance", "data.balance"):
+            "balance", "funds", "credits", "wallet", "amount", "user_balance", "user.balance", "data.balance", "walletBalance"):
                 val = self._extract_value(data, key)
                 if val is not None:
                     break
@@ -403,7 +437,15 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        default_ep = "?action=products" if is_em_store else "/api/v1/products"
+        is_canboso = "canboso.com" in self.base_url.lower()
+
+        if is_canboso:
+            default_ep = "/api/v2/telegram-buyer/products"
+        elif is_em_store:
+            default_ep = "?action=products"
+        else:
+            default_ep = "/api/v1/products"
+
         endpoint, method = self._get_endpoint_and_method("products", default_ep, "GET")
 
         response = await self._request(method, endpoint, feature_name="products")
@@ -417,11 +459,11 @@ class ResellerManager:
             if custom_list_key and custom_list_key in response:
                 raw_list = response[custom_list_key]
             else:
-                for key in ("services", "products", "data", "items", "catalog", "result"):
+                for key in ("products", "services", "data", "items", "catalog", "result"):
                     if key in response and isinstance(response[key], list):
                         raw_list = response[key]
                         break
-                if not raw_list and "success" in response:
+                if not raw_list:
                     for key, val in response.items():
                         if isinstance(val, list):
                             raw_list = val
@@ -443,19 +485,19 @@ class ResellerManager:
                 continue
 
             sid_key = field_map.get("service_id") or field_map.get("product_id") or field_map.get("id")
-            raw_id = item.get(sid_key) if sid_key else None
+            raw_id = self._extract_value(item, sid_key) if sid_key else None
             if raw_id is None:
-                for k in ("service_id", "product_id", "id", "service", "code", "item_id", "ref"):
-                    if k in item and item[k] is not None:
-                        raw_id = item[k]
+                for k in ("productId", "service_id", "product_id", "id", "service", "code", "item_id", "ref"):
+                    raw_id = self._extract_value(item, k)
+                    if raw_id is not None:
                         break
 
             name_key = field_map.get("name")
-            raw_name = item.get(name_key) if name_key else None
+            raw_name = self._extract_value(item, name_key) if name_key else None
             if raw_name is None:
                 for k in ("name", "title", "product_name", "service_name"):
-                    if k in item and item[k] is not None:
-                        raw_name = item[k]
+                    raw_name = self._extract_value(item, k)
+                    if raw_name is not None:
                         break
 
             clean_name, extracted_id = self._clean_product_name_and_id(
@@ -468,42 +510,42 @@ class ResellerManager:
                 continue
 
             price_key = field_map.get("price")
-            raw_price = item.get(price_key) if price_key else None
+            raw_price = self._extract_value(item, price_key) if price_key else None
             used_price_key = price_key
             if raw_price is None:
-                for k in ("price", "rate", "cost", "unit_price"):
-                    if k in item and item[k] is not None:
-                        raw_price = item[k]
+                for k in ("price.amount", "price", "rate", "cost", "unit_price"):
+                    raw_price = self._extract_value(item, k)
+                    if raw_price is not None:
                         used_price_key = k
                         break
 
             stock_key = field_map.get("stock")
-            raw_stock = item.get(stock_key) if stock_key else None
+            raw_stock = self._extract_value(item, stock_key) if stock_key else None
             used_stock_key = stock_key
             if raw_stock is None:
                 for k in (
-                        "quantity", "stock", "qty", "available", "available_stock",
+                        "availability.available", "quantity", "stock", "qty", "available", "available_stock",
                         "stock_count", "inventory", "count", "units", "in_stock", "balance", "amount"
                 ):
-                    if k in item and item[k] is not None and k != used_price_key:
-                        raw_stock = item[k]
+                    raw_stock = self._extract_value(item, k)
+                    if raw_stock is not None and k != used_price_key:
                         used_stock_key = k
                         break
 
             desc_key = field_map.get("description")
-            raw_desc = item.get(desc_key) if desc_key else None
+            raw_desc = self._extract_value(item, desc_key) if desc_key else None
             if raw_desc is None:
                 for k in ("description", "desc", "details", "info"):
-                    if k in item and item[k] is not None:
-                        raw_desc = item[k]
+                    raw_desc = self._extract_value(item, k)
+                    if raw_desc is not None:
                         break
 
             cat_key = field_map.get("category")
-            raw_cat = item.get(cat_key) if cat_key else None
+            raw_cat = self._extract_value(item, cat_key) if cat_key else None
             if raw_cat is None:
-                for k in ("category", "cat", "type", "group"):
-                    if k in item and item[k] is not None:
-                        raw_cat = item[k]
+                for k in ("productType", "category", "cat", "type", "group"):
+                    raw_cat = self._extract_value(item, k)
+                    if raw_cat is not None:
                         break
 
             try:
@@ -584,7 +626,15 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        default_ep = "?action=order" if is_em_store else "/api/v1/order"
+        is_canboso = "canboso.com" in self.base_url.lower()
+
+        if is_canboso:
+            default_ep = "/api/v2/telegram-buyer/purchase"
+        elif is_em_store:
+            default_ep = "?action=order"
+        else:
+            default_ep = "/api/v1/order"
+
         endpoint, method = self._get_endpoint_and_method("order", default_ep, "POST")
 
         safe_ext_id = str(external_order_id or f"ORD-{service_id}-{int(time.time())}")
