@@ -208,6 +208,7 @@ def _get_all_active_providers(db) -> list[dict]:
     """
     Fetch all active providers dynamically from database models (Provider, Reseller)
     or reseller_config services, falling back to config.py if necessary.
+    NO hardcoded providers.
     """
     providers = []
     seen_ids = set()
@@ -225,6 +226,8 @@ def _get_all_active_providers(db) -> list[dict]:
                         "base_url": (getattr(p, "base_url", "") or "").replace("/docs", "").rstrip("/"),
                         "api_key": getattr(p, "api_key", ""),
                         "type": getattr(p, "type", "reseller"),
+                        "auth_type": getattr(p, "auth_type", "query"),
+                        "auth_query_param": getattr(p, "auth_query_param", "key"),
                     })
                     seen_ids.add(pid)
         except Exception:
@@ -243,6 +246,8 @@ def _get_all_active_providers(db) -> list[dict]:
                         "base_url": (getattr(r, "base_url", "") or "").replace("/docs", "").rstrip("/"),
                         "api_key": getattr(r, "api_key", ""),
                         "type": "reseller",
+                        "auth_type": getattr(r, "auth_type", "query"),
+                        "auth_query_param": getattr(r, "auth_query_param", "key"),
                     })
                     seen_ids.add(rid)
         except Exception:
@@ -266,6 +271,8 @@ def _get_all_active_providers(db) -> list[dict]:
                                 "base_url": (b_url or "").replace("/docs", "").rstrip("/"),
                                 "api_key": a_key,
                                 "type": "reseller",
+                                "auth_type": getattr(res, "auth_type", "query") if not isinstance(res, dict) else res.get("auth_type", "query"),
+                                "auth_query_param": getattr(res, "auth_query_param", "key") if not isinstance(res, dict) else res.get("auth_query_param", "key"),
                             })
                             seen_ids.add(key_str)
             elif isinstance(all_res, list):
@@ -282,6 +289,8 @@ def _get_all_active_providers(db) -> list[dict]:
                                 "base_url": (b_url or "").replace("/docs", "").rstrip("/"),
                                 "api_key": a_key,
                                 "type": "reseller",
+                                "auth_type": getattr(res, "auth_type", "query") if not isinstance(res, dict) else res.get("auth_type", "query"),
+                                "auth_query_param": getattr(res, "auth_query_param", "key") if not isinstance(res, dict) else res.get("auth_query_param", "key"),
                             })
                             seen_ids.add(rid)
         except Exception:
@@ -297,19 +306,9 @@ def _get_all_active_providers(db) -> list[dict]:
                 "base_url": clean_url,
                 "api_key": RESELLER_API_KEY,
                 "type": "reseller",
+                "auth_type": "header",
+                "auth_query_param": "key",
             })
-
-    # Hardcoded safety fallback for Rain Deals if configured via environment or user setup
-    if not any(str(p["id"]) == "rain_deals" for p in providers):
-        providers.append({
-            "id": "rain_deals",
-            "name": "Rain Deals",
-            "base_url": "https://canboso.com",
-            "api_key": RESELLER_API_KEY,
-            "type": "reseller",
-            "auth_type": "query",
-            "auth_query_param": "key"
-        })
 
     return providers
 
@@ -352,6 +351,7 @@ def _get_reseller_credentials(reseller_id: str | None = None) -> dict:
         "base_url": clean_base_url,
         "api_key": RESELLER_API_KEY,
         "name": "Excalibur Shop Bot",
+        "auth_type": "header",
     }
 
 
@@ -644,7 +644,7 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             logger.error("Diagnostic ResellerAPIError for provider=%s: %s", prov_id, str(e))
             err_text = str(e)
             if "HTTP 401" in err_text or "authentication" in err_text.lower() or "hop le" in err_text.lower() or "khong hop le" in err_text.lower():
-                display_msg = f"Rain Deals API authentication failed: {err_text}"
+                display_msg = f"API authentication failed for {_esc(reseller_name)}: {err_text}"
             else:
                 display_msg = f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(err_text)}</code>\n\n" \
                               "Please check API key and provider settings."
