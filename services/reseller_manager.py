@@ -343,6 +343,8 @@ class ResellerManager:
                         pass
 
                     err_msg = f"Unable to process {feature_name}: {clean_detail}"
+                    if "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower():
+                        err_msg = f"Rain Deals API error (HTTP {response.status}): {clean_detail}"
 
                     raise ResellerAPIError(
                         message=err_msg,
@@ -356,7 +358,7 @@ class ResellerManager:
                     return None
 
                 try:
-                    return await response.json(content_type=None)
+                    return json.loads(text)
                 except Exception:
                     return sanitized_text
 
@@ -446,7 +448,24 @@ class ResellerManager:
 
         endpoint, method = self._get_endpoint_and_method("products", default_ep, "GET")
 
-        response = await self._request(method, endpoint, feature_name="products")
+        try:
+            response = await self._request(method, endpoint, feature_name="products")
+        except ResellerAPIError as e:
+            logger.error(
+                "Rain Deals API Error | provider_id=%s | url=%s | status=%s | message=%s",
+                self.provider_id,
+                getattr(e, "url", endpoint),
+                getattr(e, "status_code", "Unknown"),
+                self._sanitize_text(str(e))
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                "Rain Deals Unexpected Request Error | provider_id=%s | error=%s",
+                self.provider_id,
+                self._sanitize_text(str(e))
+            )
+            raise
 
         if is_canboso and isinstance(response, dict):
             if response.get("success") is False:
@@ -457,24 +476,33 @@ class ResellerManager:
         if isinstance(response, list):
             raw_list = response
         elif isinstance(response, dict):
-            mapping = self._get_mapping("products", {})
-            custom_list_key = mapping.get("products_list_key") if isinstance(mapping, dict) else None
-            if custom_list_key and custom_list_key in response:
-                raw_list = response[custom_list_key]
+            if "products" in response and isinstance(response["products"], list):
+                raw_list = response["products"]
             else:
-                for key in ("products", "services", "data", "items", "catalog", "result"):
-                    if key in response and isinstance(response[key], list):
-                        raw_list = response[key]
-                        break
-                if not raw_list:
-                    for key, val in response.items():
-                        if isinstance(val, list):
-                            raw_list = val
+                mapping = self._get_mapping("products", {})
+                custom_list_key = mapping.get("products_list_key") if isinstance(mapping, dict) else None
+                if custom_list_key and custom_list_key in response:
+                    raw_list = response[custom_list_key]
+                else:
+                    for key in ("products", "services", "data", "items", "catalog", "result"):
+                        if key in response and isinstance(response[key], list):
+                            raw_list = response[key]
                             break
+                    if not raw_list:
+                        for key, val in response.items():
+                            if isinstance(val, list):
+                                raw_list = val
+                                break
 
         if not isinstance(raw_list, list):
+            sanitized_resp = self._sanitize_text(str(response))
+            logger.error(
+                "Rain Deals invalid product catalog format received | provider_id=%s | response_preview=%s",
+                self.provider_id,
+                sanitized_resp[:300]
+            )
             raise ResellerAPIError(
-                message="Invalid product catalog format received.",
+                message="Rain Deals returned an unexpected products response.",
                 provider_id=self.provider_id,
             )
 
@@ -633,22 +661,30 @@ class ResellerManager:
 
         if is_canboso:
             default_ep = "/api/v2/telegram-buyer/purchase"
+            payload = {
+                "product_id": str(service_id),
+                "quantity": int(quantity),
+            }
         elif is_em_store:
             default_ep = "?action=order"
+            payload = {
+                "service_id": str(service_id),
+                "product_id": str(service_id),
+                "quantity": int(quantity),
+                "qty": int(quantity),
+                "external_order_id": str(external_order_id or f"ORD-{service_id}-{int(time.time())}"),
+            }
         else:
             default_ep = "/api/v1/order"
+            payload = {
+                "service_id": str(service_id),
+                "product_id": str(service_id),
+                "quantity": int(quantity),
+                "qty": int(quantity),
+                "external_order_id": str(external_order_id or f"ORD-{service_id}-{int(time.time())}"),
+            }
 
         endpoint, method = self._get_endpoint_and_method("order", default_ep, "POST")
-
-        safe_ext_id = str(external_order_id or f"ORD-{service_id}-{int(time.time())}")
-
-        payload = {
-            "service_id": str(service_id),
-            "product_id": str(service_id),
-            "quantity": int(quantity),
-            "qty": int(quantity),
-            "external_order_id": safe_ext_id,
-        }
         payload.update(kwargs)
 
         res = await self._request(
