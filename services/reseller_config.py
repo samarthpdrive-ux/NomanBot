@@ -106,14 +106,28 @@ def _load_resellers_from_env() -> dict[str, ResellerConfig]:
 
     excalibur_name = os.getenv("EXCALIBUR_RESELLER_NAME", "Excalibur Shop Bot")
 
+    is_excalibur_canboso = "canboso.com" in excalibur_base_url.lower()
+    excalibur_auth_type = "query" if is_excalibur_canboso else "header"
+    excalibur_auth_query_param = "key" if is_excalibur_canboso else "key"
+
+    excalibur_endpoints = {}
+    if is_excalibur_canboso:
+        excalibur_endpoints = {
+            "products": "/api/v2/telegram-buyer/products",
+            "balance": "/api/v2/telegram-buyer/balance",
+            "order": "/api/v2/telegram-buyer/purchase",
+        }
+
     resellers["excalibur"] = ResellerConfig(
         name=excalibur_name,
         base_url=excalibur_base_url,
         api_key=excalibur_api_key,
         id="excalibur",
         api_type="excalibur",
-        auth_type="header",
+        auth_type=excalibur_auth_type,
         auth_header_name="X-API-Key",
+        auth_query_param=excalibur_auth_query_param,
+        endpoints=excalibur_endpoints,
         is_active=True,
     )
 
@@ -141,7 +155,33 @@ def _load_resellers_from_env() -> dict[str, ResellerConfig]:
             api_key = os.getenv(f"{prefix}API_KEY", "").strip()
             name = os.getenv(f"{prefix}NAME", f"Provider {provider_id.title()}")
             api_type = os.getenv(f"{prefix}TYPE", "reseller").lower()
-            auth_type = os.getenv(f"{prefix}AUTH_TYPE", "header").lower()
+
+            is_canboso = "canboso.com" in base_url.lower()
+
+            # Explicit auth_type wins; fallback to query if canboso, else header
+            default_auth = "query" if is_canboso else "header"
+            auth_type = os.getenv(f"{prefix}AUTH_TYPE", "").lower() or default_auth
+            auth_header = os.getenv(f"{prefix}AUTH_HEADER", "") or os.getenv(f"{prefix}AUTH_HEADER_NAME", "X-API-Key")
+            auth_query = os.getenv(f"{prefix}AUTH_QUERY_PARAM", "key")
+
+            endpoints = {}
+            if is_canboso:
+                endpoints = {
+                    "products": os.getenv(f"{prefix}PRODUCTS_ENDPOINT", "/api/v2/telegram-buyer/products"),
+                    "balance": os.getenv(f"{prefix}BALANCE_ENDPOINT", "/api/v2/telegram-buyer/balance"),
+                    "order": os.getenv(f"{prefix}ORDER_ENDPOINT", "/api/v2/telegram-buyer/purchase"),
+                }
+            else:
+                p_prod = os.getenv(f"{prefix}PRODUCTS_ENDPOINT")
+                p_bal = os.getenv(f"{prefix}BALANCE_ENDPOINT")
+                p_ord = os.getenv(f"{prefix}ORDER_ENDPOINT")
+                if p_prod or p_bal or p_ord:
+                    if p_prod:
+                        endpoints["products"] = p_prod
+                    if p_bal:
+                        endpoints["balance"] = p_bal
+                    if p_ord:
+                        endpoints["order"] = p_ord
 
             if base_url and api_key:
                 resellers[provider_id] = ResellerConfig(
@@ -151,6 +191,9 @@ def _load_resellers_from_env() -> dict[str, ResellerConfig]:
                     id=provider_id,
                     api_type=api_type,
                     auth_type=auth_type,
+                    auth_header_name=auth_header,
+                    auth_query_param=auth_query,
+                    endpoints=endpoints,
                     is_active=os.getenv(f"{prefix}ACTIVE", "true").lower() in ("true", "1", "yes"),
                 )
 
