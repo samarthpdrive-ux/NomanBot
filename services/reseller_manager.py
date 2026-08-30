@@ -96,7 +96,7 @@ class ResellerManager:
             self.config_dict.get("id")
             or self.config_dict.get("provider_id")
             or getattr(self.config, "id", None)
-            or "excalibur"
+            or "default_provider"
         )
         self.provider_name = str(
             self.config_dict.get("name")
@@ -118,7 +118,7 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        is_canboso = "canboso.com" in self.base_url.lower()
 
         if raw_auth_type:
             self.auth_type = raw_auth_type
@@ -216,7 +216,7 @@ class ResellerManager:
             elif isinstance(ep_val, str):
                 return ep_val, default_method
 
-        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        is_canboso = "canboso.com" in self.base_url.lower()
         if is_canboso:
             if feature == "products":
                 return "/api/v2/telegram-buyer/products", default_method
@@ -239,7 +239,7 @@ class ResellerManager:
                 return mappings[feature]
             return mappings
 
-        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        is_canboso = "canboso.com" in self.base_url.lower()
         if is_canboso and feature == "products":
             return {
                 "service_id": "productId",
@@ -343,8 +343,6 @@ class ResellerManager:
                         pass
 
                     err_msg = f"Unable to process {feature_name}: {clean_detail}"
-                    if "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower():
-                        err_msg = f"Rain Deals API error (HTTP {response.status}): {clean_detail}"
 
                     logger.error(
                         "Reseller API Request Failed | provider_id=%s | url=%s | status=%s | response=%s",
@@ -391,7 +389,7 @@ class ResellerManager:
 
     async def get_me(self) -> dict[str, Any]:
         """Fetch account metadata from provider."""
-        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        is_canboso = "canboso.com" in self.base_url.lower()
         default_ep = "/api/v2/telegram-buyer/balance" if is_canboso else "/api/v1/me"
         endpoint, method = self._get_endpoint_and_method("me", default_ep, "GET")
         res = await self._request(method, endpoint, feature_name="me")
@@ -403,7 +401,7 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        is_canboso = "canboso.com" in self.base_url.lower()
 
         if is_canboso:
             default_ep = "/api/v2/telegram-buyer/balance"
@@ -447,7 +445,7 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        is_canboso = "canboso.com" in self.base_url.lower()
 
         if is_canboso:
             default_ep = "/api/v2/telegram-buyer/products"
@@ -458,28 +456,11 @@ class ResellerManager:
 
         endpoint, method = self._get_endpoint_and_method("products", default_ep, "GET")
 
-        try:
-            response = await self._request(method, endpoint, feature_name="products")
-        except ResellerAPIError as e:
-            logger.error(
-                "Rain Deals API Error | provider_id=%s | url=%s | status=%s | message=%s",
-                self.provider_id,
-                getattr(e, "url", endpoint),
-                getattr(e, "status_code", "Unknown"),
-                self._sanitize_text(str(e))
-            )
-            raise
-        except Exception as e:
-            logger.error(
-                "Rain Deals Unexpected Request Error | provider_id=%s | error=%s",
-                self.provider_id,
-                self._sanitize_text(str(e))
-            )
-            raise
+        response = await self._request(method, endpoint, feature_name="products")
 
         if is_canboso and isinstance(response, dict):
             if response.get("success") is False:
-                msg = response.get("message") or response.get("error") or "Canboso API returned failure."
+                msg = response.get("message") or response.get("error") or "API returned failure."
                 raise ResellerAPIError(message=str(msg), provider_id=self.provider_id)
 
         raw_list = []
@@ -507,12 +488,12 @@ class ResellerManager:
         if not isinstance(raw_list, list):
             sanitized_resp = self._sanitize_text(str(response))
             logger.error(
-                "Rain Deals invalid product catalog format received | provider_id=%s | response_preview=%s",
+                "Invalid product catalog format received | provider_id=%s | response_preview=%s",
                 self.provider_id,
                 sanitized_resp[:300]
             )
             raise ResellerAPIError(
-                message="Rain Deals returned an unexpected products response.",
+                message="Provider returned an unexpected products response.",
                 provider_id=self.provider_id,
             )
 
@@ -667,7 +648,7 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        is_canboso = "canboso.com" in self.base_url.lower()
 
         if is_canboso:
             default_ep = "/api/v2/telegram-buyer/purchase"
@@ -817,4 +798,4 @@ class ResellerManager:
                 "message": f"Unexpected error connecting to provider: {str(err)}",
             }
 
-        verify_connection = test_connection
+    verify_connection = test_connection
