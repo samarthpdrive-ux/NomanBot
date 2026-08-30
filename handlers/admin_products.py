@@ -56,7 +56,7 @@ _provider_fetch_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║             UTILITY FUNCTIONS                                ║
+# ║                  UTILITY FUNCTIONS                           ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 def _parse_bulk_pricing(raw_text: str) -> dict | None:
@@ -377,7 +377,7 @@ async def _show_product_source_selection(target: Message | CallbackQuery, state:
 
     text = (
         "╔══════════════════════════════╗\n"
-        "║  📦 CREATE NEW PRODUCT       ║\n"
+        "║  📦 CREATE NEW PRODUCT        ║\n"
         "╚══════════════════════════════╝\n\n"
         "Choose where this product will come from.\n\n"
         "🏠 <b>Own Product</b>\n"
@@ -440,7 +440,7 @@ async def add_product_own(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ╔══════════════════════════════════════════════════════════════╝
+# ╔══════════════════════════════════════════════════════════════╗
 # ║            RESELLER IMPORT FLOW HANDLERS                     ║
 # ╚══════════════════════════════════════════════════════════════╝
 
@@ -484,7 +484,7 @@ async def add_product_reseller(callback: CallbackQuery, state: FSMContext):
         buttons.append([
             InlineKeyboardButton(
                 text=f"🏪 {p_name}",
-                callback_data=f"reseller:{p_id}"
+                callback_data=f"reseller_selected:{p_id}"
             )
         ])
 
@@ -505,15 +505,21 @@ async def add_product_reseller(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("reseller:") | F.data.startswith("provider:"))
+@router.callback_query(F.data.startswith("reseller_selected:") | F.data.startswith("reseller:") | F.data.startswith("provider:"))
 async def reseller_selected(callback: CallbackQuery, state: FSMContext):
     """Handle explicit reseller/provider selection."""
     if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("❌ Admin only.", show_alert=True)
         return
 
-    prefix = "provider:" if callback.data.startswith("provider:") else "reseller:"
-    reseller_id = callback.data.split(prefix, 1)[1]
+    for prefix in ("reseller_selected:", "provider:", "reseller:"):
+        if callback.data.startswith(prefix):
+            reseller_id = callback.data.split(prefix, 1)[1]
+            break
+    else:
+        reseller_id = callback.data.split(":", 1)[1]
+
+    await callback.answer()
     await _fetch_and_show_reseller_products(callback, state, reseller_id=reseller_id)
 
 
@@ -528,10 +534,6 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
     lock = _provider_fetch_locks[lock_key]
 
     if lock.locked():
-        await callback.answer(
-            "⏳ Product list is already being loaded...",
-            show_alert=False,
-        )
         return
 
     async with lock:
@@ -542,13 +544,12 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             db.close()
 
         if not prov:
-            await callback.message.answer(
+            await callback.message.edit_text(
                 "❌ <b>Provider Configuration Error:</b>\n"
                 "Selected provider was not found or is inactive.\n\n"
                 "Please check <b>Admin → Providers</b>.",
                 parse_mode="HTML"
             )
-            await callback.answer()
             return
 
         base_url = prov["base_url"]
@@ -557,12 +558,11 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         prov_id = prov["id"]
 
         if not api_key or not base_url:
-            await callback.message.answer(
+            await callback.message.edit_text(
                 f"❌ <b>Provider configuration for {_esc(reseller_name)} is incomplete.</b>\n\n"
                 "Please check provider settings in Admin → Providers.",
                 parse_mode="HTML"
             )
-            await callback.answer()
             return
 
         await state.update_data(
@@ -577,30 +577,25 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             reseller_id,
         )
 
-        await callback.message.answer(f"🔄 <i>Fetching products from {_esc(reseller_name)} API...</i>", parse_mode="HTML")
-
         try:
-            manager = ResellerManager(api_key=api_key, base_url=base_url)
+            manager = ResellerManager(api_key=api_key, base_url=base_url, provider_config=prov)
             products = await manager.get_products()
         except ResellerAPIError as e:
-            await callback.message.answer(
+            await callback.message.edit_text(
                 f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(str(e))}</code>\n\n"
                 "Please check API key and provider settings.",
                 parse_mode="HTML"
             )
-            await callback.answer()
             return
         except Exception as e:
-            await callback.message.answer(
+            await callback.message.edit_text(
                 f"❌ <b>Connection Error:</b> Could not reach provider {_esc(reseller_name)}.\n<code>{_esc(str(e))}</code>",
                 parse_mode="HTML"
             )
-            await callback.answer()
             return
 
         if not isinstance(products, list) or not products:
-            await callback.message.answer(f"📦 No products available from {_esc(reseller_name)}.", parse_mode="HTML")
-            await callback.answer()
+            await callback.message.edit_text(f"📦 No products available from {_esc(reseller_name)}.", parse_mode="HTML")
             return
 
         logger.info(
@@ -616,11 +611,19 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         for prod in products:
             if not isinstance(prod, dict):
                 continue
-            service_id = str(prod.get("service_id", "")).strip()
+            service_id = str(prod.get("service_id") or prod.get("productId") or "").strip()
             if not service_id:
                 continue
-            name = prod.get("name", "Unknown Product")
-            price = float(prod.get("price", 0.0))
+            name = prod.get("name") or prod.get("title") or "Unknown Product"
+            
+            raw_price = prod.get("price")
+            if isinstance(raw_price, dict):
+                price = float(raw_price.get("amount", 0.0))
+            else:
+                try:
+                    price = float(raw_price or 0.0)
+                except (ValueError, TypeError):
+                    price = 0.0
 
             raw_stock = prod.get("stock")
             if raw_stock is not None:
@@ -629,7 +632,14 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
                 except (ValueError, TypeError):
                     stock_val = 999999
             else:
-                stock_val = 999999
+                raw_av = prod.get("availability")
+                if isinstance(raw_av, dict) and "available" in raw_av:
+                    try:
+                        stock_val = int(raw_av["available"])
+                    except (ValueError, TypeError):
+                        stock_val = 999999
+                else:
+                    stock_val = 999999
 
             products_cache[service_id] = prod
 
@@ -659,7 +669,7 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-        await callback.message.answer(
+        await callback.message.edit_text(
             "╔══════════════════════════════╗\n"
             "║  📦 PROVIDER PRODUCTS        ║\n"
             "╚══════════════════════════════╝\n\n"
@@ -669,7 +679,6 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             parse_mode="HTML",
             reply_markup=keyboard
         )
-        await callback.answer()
 
 
 @router.callback_query(F.data.startswith("reseller_prod:"))
@@ -689,8 +698,15 @@ async def reseller_product_selected(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Product metadata lost. Please try again.", show_alert=True)
         return
 
-    reseller_product_name = selected.get("name", "Reseller Product")
-    reseller_cost = Decimal(str(selected.get("price", "0.00")))
+    reseller_product_name = selected.get("name") or selected.get("title") or "Reseller Product"
+    raw_price = selected.get("price")
+    if isinstance(raw_price, dict):
+        reseller_cost = Decimal(str(raw_price.get("amount", "0.00")))
+    else:
+        try:
+            reseller_cost = Decimal(str(raw_price or "0.00"))
+        except Exception:
+            reseller_cost = Decimal("0.00")
 
     raw_stock = selected.get("stock")
     if raw_stock is not None:
@@ -699,7 +715,14 @@ async def reseller_product_selected(callback: CallbackQuery, state: FSMContext):
         except (ValueError, TypeError):
             reseller_stock = 999999
     else:
-        reseller_stock = 999999
+        raw_av = selected.get("availability")
+        if isinstance(raw_av, dict) and "available" in raw_av:
+            try:
+                reseller_stock = int(raw_av["available"])
+            except (ValueError, TypeError):
+                reseller_stock = 999999
+        else:
+            reseller_stock = 999999
 
     reseller_name = data.get("reseller_name", "Reseller")
 
@@ -720,9 +743,9 @@ async def reseller_product_selected(callback: CallbackQuery, state: FSMContext):
         reseller_cost=float(reseller_cost),
         reseller_stock=reseller_stock,
         reseller_name=reseller_name,
-        icon="📦",
-        category="reseller",
-        description=f"Imported from reseller: {reseller_product_name}",
+        icon=selected.get("emoji", "📦") or "📦",
+        category=selected.get("productType", "reseller") or "reseller",
+        description=selected.get("description", f"Imported from reseller: {reseller_product_name}"),
         delivery_type="automatic",
     )
 
@@ -748,7 +771,7 @@ async def reseller_product_selected(callback: CallbackQuery, state: FSMContext):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              OWN PRODUCT STEPS (1-10)                        ║
+# ║                 OWN PRODUCT STEPS (1-10)                     ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.message(AddProduct.name)
@@ -895,7 +918,7 @@ async def product_price(message: Message, state: FSMContext):
 
             # Locate existing database record if product was previously imported
             existing_product = None
-            if parsed_provider_id and reseller_service_id:
+            if parsed_provider_id is not None and reseller_service_id:
                 existing_product = db.query(Product).filter(
                     Product.provider_id == parsed_provider_id,
                     Product.reseller_service_id == str(reseller_service_id)
@@ -1315,7 +1338,7 @@ async def save_product(message: Message, state: FSMContext):
     # Build success message
     text_parts = [
         "╔══════════════════════════════╗",
-        "║  ✅ PRODUCT CREATED ✨       ║",
+        "║  ✅ PRODUCT CREATED ✨        ║",
         "╚══════════════════════════════╝",
         "",
         f"🆔 <b>ID:</b> {pid}",
