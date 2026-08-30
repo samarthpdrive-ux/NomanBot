@@ -41,7 +41,6 @@ class ResellerAPIError(Exception):
         self.provider_id = provider_id
         self.url = url
 
-        # Omit full raw response append to keep exceptions clean
         self.message = str(message)
         super().__init__(self.message)
 
@@ -217,7 +216,6 @@ class ResellerManager:
             elif isinstance(ep_val, str):
                 return ep_val, default_method
 
-        # Canboso global sensible defaults if base_url matches and no explicit override given
         if "canboso.com" in self.base_url.lower():
             if feature == "products":
                 return "/api/v2/telegram-buyer/products", default_method
@@ -240,7 +238,6 @@ class ResellerManager:
                 return mappings[feature]
             return mappings
 
-        # Default fallback mapping for Canboso if none provided
         if "canboso.com" in self.base_url.lower() and feature == "products":
             return {
                 "service_id": "productId",
@@ -416,7 +413,6 @@ class ResellerManager:
             val = self._extract_value(data, balance_key)
 
         if val is None and isinstance(data, dict):
-            # Also check Canboso structure like wallet balance or nested properties if any
             for key in (
             "balance", "funds", "credits", "wallet", "amount", "user_balance", "user.balance", "data.balance", "walletBalance"):
                 val = self._extract_value(data, key)
@@ -449,6 +445,11 @@ class ResellerManager:
         endpoint, method = self._get_endpoint_and_method("products", default_ep, "GET")
 
         response = await self._request(method, endpoint, feature_name="products")
+
+        if is_canboso and isinstance(response, dict):
+            if response.get("success") is False:
+                msg = response.get("message") or response.get("error") or "Canboso API returned failure."
+                raise ResellerAPIError(message=str(msg), provider_id=self.provider_id)
 
         raw_list = []
         if isinstance(response, list):
