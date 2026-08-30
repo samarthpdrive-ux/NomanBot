@@ -206,94 +206,109 @@ def _divider(char: str = "━", length: int = 30) -> str:
 
 def _get_all_active_providers(db) -> list[dict]:
     """
-    Fetch all active providers dynamically and deduplicate them 
-    so each unique provider/URL appears only once in the list.
+    Fetch all active providers dynamically from database models (Provider, Reseller)
+    or reseller_config services, falling back to config.py if necessary.
+    Completely dynamic with zero hardcoded provider names.
     """
     providers = []
     seen_ids = set()
-    seen_keys = set()  # Tracks unique name + base_url combinations to prevent duplicates
 
-    def _add_provider(p_id, p_name, p_url, p_key, p_auth="query", p_param="key"):
-        clean_url = (p_url or "").replace("/docs", "").rstrip("/")
-        if not clean_url:
-            return
-            
-        fingerprint = (p_name.strip().lower(), clean_url.lower())
-        
-        if str(p_id) not in seen_ids and fingerprint not in seen_keys:
-            seen_ids.add(str(p_id))
-            seen_keys.add(fingerprint)
-            providers.append({
-                "id": str(p_id),
-                "name": p_name,
-                "base_url": clean_url,
-                "api_key": p_key,
-                "type": "reseller",
-                "auth_type": p_auth,
-                "auth_query_param": p_param,
-            })
-
-    # 1. Query Provider model
+    # 1. Query Provider model dynamically
     if Provider is not None:
         try:
             db_providers = db.query(Provider).filter(getattr(Provider, "is_active", True) == True).all()
             for p in db_providers:
-                _add_provider(
-                    p.id,
-                    getattr(p, "name", "Provider"),
-                    getattr(p, "base_url", ""),
-                    getattr(p, "api_key", ""),
-                    getattr(p, "auth_type", "query"),
-                    getattr(p, "auth_query_param", "key")
-                )
+                pid = str(p.id)
+                if pid not in seen_ids:
+                    providers.append({
+                        "id": pid,
+                        "name": getattr(p, "name", "Provider"),
+                        "base_url": (getattr(p, "base_url", "") or "").replace("/docs", "").rstrip("/"),
+                        "api_key": getattr(p, "api_key", ""),
+                        "type": getattr(p, "type", "reseller"),
+                        "auth_type": getattr(p, "auth_type", "query"),
+                        "auth_query_param": getattr(p, "auth_query_param", "key"),
+                    })
+                    seen_ids.add(pid)
         except Exception:
             pass
 
-    # 2. Query Reseller model
+    # 2. Query Reseller model dynamically
     if Reseller is not None:
         try:
             db_resellers = db.query(Reseller).filter(getattr(Reseller, "is_active", True) == True).all()
             for r in db_resellers:
-                _add_provider(
-                    r.id,
-                    getattr(r, "name", "Reseller"),
-                    getattr(r, "base_url", ""),
-                    getattr(r, "api_key", ""),
-                    getattr(r, "auth_type", "query"),
-                    getattr(r, "auth_query_param", "key")
-                )
+                rid = str(r.id)
+                if rid not in seen_ids:
+                    providers.append({
+                        "id": rid,
+                        "name": getattr(r, "name", "Reseller"),
+                        "base_url": (getattr(r, "base_url", "") or "").replace("/docs", "").rstrip("/"),
+                        "api_key": getattr(r, "api_key", ""),
+                        "type": "reseller",
+                        "auth_type": getattr(r, "auth_type", "query"),
+                        "auth_query_param": getattr(r, "auth_query_param", "key"),
+                    })
+                    seen_ids.add(rid)
         except Exception:
             pass
 
-    # 3. Query get_all_resellers() service
+    # 3. Query get_all_resellers() service dynamically if available
     if get_all_resellers:
         try:
             all_res = get_all_resellers()
             if isinstance(all_res, dict):
                 for key, res in all_res.items():
-                    b_url = getattr(res, "base_url", None) or (res.get("base_url") if isinstance(res, dict) else "")
-                    a_key = getattr(res, "api_key", None) or (res.get("api_key") if isinstance(res, dict) else "")
-                    r_name = getattr(res, "name", None) or (res.get("name") if isinstance(res, dict) else str(key))
-                    a_type = getattr(res, "auth_type", "query") if not isinstance(res, dict) else res.get("auth_type", "query")
-                    a_param = getattr(res, "auth_query_param", "key") if not isinstance(res, dict) else res.get("auth_query_param", "key")
-                    if b_url and a_key:
-                        _add_provider(key, r_name, b_url, a_key, a_type, a_param)
+                    key_str = str(key)
+                    if key_str not in seen_ids:
+                        b_url = getattr(res, "base_url", None) or (res.get("base_url") if isinstance(res, dict) else "")
+                        a_key = getattr(res, "api_key", None) or (res.get("api_key") if isinstance(res, dict) else "")
+                        r_name = getattr(res, "name", None) or (res.get("name") if isinstance(res, dict) else key_str)
+                        if b_url and a_key:
+                            providers.append({
+                                "id": key_str,
+                                "name": r_name,
+                                "base_url": (b_url or "").replace("/docs", "").rstrip("/"),
+                                "api_key": a_key,
+                                "type": "reseller",
+                                "auth_type": getattr(res, "auth_type", "query") if not isinstance(res, dict) else res.get("auth_type", "query"),
+                                "auth_query_param": getattr(res, "auth_query_param", "key") if not isinstance(res, dict) else res.get("auth_query_param", "key"),
+                            })
+                            seen_ids.add(key_str)
             elif isinstance(all_res, list):
                 for res in all_res:
-                    rid = getattr(res, "id", None) or (res.get("id") if isinstance(res, dict) else "default")
-                    b_url = getattr(res, "base_url", None) or (res.get("base_url") if isinstance(res, dict) else "")
-                    a_key = getattr(res, "api_key", None) or (res.get("api_key") if isinstance(res, dict) else "")
-                    r_name = getattr(res, "name", None) or (res.get("name") if isinstance(res, dict) else str(rid))
-                    a_type = getattr(res, "auth_type", "query") if not isinstance(res, dict) else res.get("auth_type", "query")
-                    a_param = getattr(res, "auth_query_param", "key") if not isinstance(res, dict) else res.get("auth_query_param", "key")
-                    if b_url and a_key:
-                        _add_provider(rid, r_name, b_url, a_key, a_type, a_param)
+                    rid = str(getattr(res, "id", None) or (res.get("id") if isinstance(res, dict) else "default"))
+                    if rid not in seen_ids:
+                        b_url = getattr(res, "base_url", None) or (res.get("base_url") if isinstance(res, dict) else "")
+                        a_key = getattr(res, "api_key", None) or (res.get("api_key") if isinstance(res, dict) else "")
+                        r_name = getattr(res, "name", None) or (res.get("name") if isinstance(res, dict) else rid)
+                        if b_url and a_key:
+                            providers.append({
+                                "id": rid,
+                                "name": r_name,
+                                "base_url": (b_url or "").replace("/docs", "").rstrip("/"),
+                                "api_key": a_key,
+                                "type": "reseller",
+                                "auth_type": getattr(res, "auth_type", "query") if not isinstance(res, dict) else res.get("auth_type", "query"),
+                                "auth_query_param": getattr(res, "auth_query_param", "key") if not isinstance(res, dict) else res.get("auth_query_param", "key"),
+                            })
+                            seen_ids.add(rid)
         except Exception:
             pass
 
     # 4. Fallback to config.py environment defaults if database is empty
     if not providers and RESELLER_BASE_URL and RESELLER_API_KEY:
-        _add_provider("default_reseller", "Default Provider", RESELLER_BASE_URL, RESELLER_API_KEY, "header", "key")
+        clean_url = RESELLER_BASE_URL.replace("/docs", "").rstrip("/")
+        if clean_url:
+            providers.append({
+                "id": "default_reseller",
+                "name": "Default Provider",
+                "base_url": clean_url,
+                "api_key": RESELLER_API_KEY,
+                "type": "reseller",
+                "auth_type": "header",
+                "auth_query_param": "key",
+            })
 
     return providers
 
@@ -345,7 +360,7 @@ def _get_reseller_credentials(reseller_id: str | None = None) -> dict:
 # ╚══════════════════════════════════════════════════════════════╝
 
 async def _show_product_source_selection(target: Message | CallbackQuery, state: FSMContext):
-    """Render the initial product source selection screen cleanly."""
+    """Render the initial product source selection screen."""
     await state.clear()
     await state.set_state(AddProduct.source)
 
@@ -386,10 +401,7 @@ async def _show_product_source_selection(target: Message | CallbackQuery, state:
     )
 
     if isinstance(target, CallbackQuery):
-        try:
-            await target.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
-        except Exception:
-            await target.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+        await target.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
         await target.answer()
     else:
         await target.answer(text, parse_mode="HTML", reply_markup=keyboard)
@@ -427,20 +439,16 @@ async def add_product_own(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(AddProduct.name)
 
-    text = (
+    await callback.message.answer(
         "╔══════════════════════════════╗\n"
         "║  🏠 OWN PRODUCT              ║\n"
         "╚══════════════════════════════╝\n\n"
         "✏️ <b>Step 1/10: Product Name</b>\n\n"
         f"{_divider('─')}\n\n"
         "Send the product name.\n\n"
-        "<i>Example: Gemini Advanced 1 Month</i>"
+        "<i>Example: Gemini Advanced 1 Month</i>",
+        parse_mode="HTML"
     )
-
-    try:
-        await callback.message.edit_text(text, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
 
@@ -477,10 +485,7 @@ async def add_product_reseller(callback: CallbackQuery, state: FSMContext):
                 ]
             ]
         )
-        try:
-            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
-        except Exception:
-            await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
         await callback.answer()
         return
 
@@ -508,11 +513,7 @@ async def add_product_reseller(callback: CallbackQuery, state: FSMContext):
         "Choose a provider to import products from:\n"
     )
 
-    try:
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
-    except Exception:
-        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
-    
+    await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
     await callback.answer()
 
 
@@ -553,10 +554,8 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
     lock = _provider_fetch_locks[lock_key]
 
     if lock.locked():
-        await callback.answer("⏳ Fetch already in progress. Please wait...", show_alert=True)
+        await callback.answer("⏳ Fetch already in progress...", show_alert=True)
         return
-
-    await callback.answer("🔄 Connecting to provider...")
 
     async with lock:
         db = SessionLocal()
@@ -587,8 +586,18 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         api_key = prov.get("api_key", "")
         reseller_name = prov.get("name", "Provider")
         prov_id = prov.get("id", reseller_id)
+        auth_type = prov.get("auth_type", "query")
+
+        logger.info(
+            "Diagnostic Provider Config Found | provider_id=%s | name=%s | base_url=%s | auth_type=%s",
+            prov_id,
+            reseller_name,
+            base_url,
+            auth_type
+        )
 
         if not api_key or not base_url:
+            logger.warning("Diagnostic Provider Config Incomplete for provider_id=%s", prov_id)
             try:
                 await callback.message.edit_text(
                     f"❌ <b>Provider configuration for {_esc(reseller_name)} is incomplete.</b>\n\n"
@@ -609,30 +618,39 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             reseller_name=reseller_name
         )
 
+        logger.info(
+            "Starting reseller product import: user_id=%s provider=%s",
+            user_id,
+            prov_id,
+        )
+
         try:
-            async with asyncio.timeout(15):
+            async with asyncio.timeout(20):
                 manager = ResellerManager(api_key=api_key, base_url=base_url, provider_config=prov)
                 products = await manager.get_products()
         except asyncio.TimeoutError:
             logger.error("Provider request timed out for provider_id=%s", prov_id)
             try:
                 await callback.message.edit_text(
-                    f"❌ <b>Connection Timeout:</b> Could not reach provider {_esc(reseller_name)} within 15 seconds.",
+                    f"❌ <b>Connection Timeout:</b> Could not reach provider {_esc(reseller_name)} within timeout.",
                     parse_mode="HTML"
                 )
             except Exception:
-                pass
+                await callback.message.answer(
+                    f"❌ <b>Connection Timeout:</b> Could not reach provider {_esc(reseller_name)} within timeout.",
+                    parse_mode="HTML"
+                )
             return
         except ResellerAPIError as e:
             logger.error("Diagnostic ResellerAPIError for provider=%s: %s", prov_id, str(e))
             err_text = str(e)
             display_msg = f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(err_text)}</code>\n\n" \
-                          "Please check your API key or verify if the provider's server is up."
+                          "Please check API key and provider settings."
 
             try:
                 await callback.message.edit_text(display_msg, parse_mode="HTML")
             except Exception:
-                pass
+                await callback.message.answer(display_msg, parse_mode="HTML")
             return
         except Exception as e:
             logger.error("Diagnostic Connection Error for provider=%s: %s", prov_id, str(e))
@@ -642,15 +660,25 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
                     parse_mode="HTML"
                 )
             except Exception:
-                pass
+                await callback.message.answer(
+                    f"❌ <b>Connection Error:</b> Could not reach provider {_esc(reseller_name)}.\n<code>{_esc(str(e))}</code>",
+                    parse_mode="HTML"
+                )
             return
 
         if not isinstance(products, list) or not products:
             try:
                 await callback.message.edit_text(f"📦 No products available from {_esc(reseller_name)}.", parse_mode="HTML")
             except Exception:
-                pass
+                await callback.message.answer(f"📦 No products available from {_esc(reseller_name)}.", parse_mode="HTML")
             return
+
+        logger.info(
+            "Completed reseller product import: user_id=%s provider=%s count=%s",
+            user_id,
+            prov_id,
+            len(products),
+        )
 
         buttons = []
         products_cache = {}
@@ -715,13 +743,14 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
                     )
                 ])
             except Exception:
+                logger.exception("Skipping malformed product entry during rendering: %s", prod)
                 continue
 
         if not products_cache:
             try:
                 await callback.message.edit_text("No products available.", parse_mode="HTML")
             except Exception:
-                pass
+                await callback.message.answer("No products available.", parse_mode="HTML")
             return
 
         await state.update_data(reseller_products_cache=products_cache)
@@ -747,6 +776,7 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
                 reply_markup=keyboard
             )
         except Exception:
+            logger.exception("Failed to edit Telegram message with reseller product buttons")
             try:
                 await callback.message.answer(
                     "╔══════════════════════════════╗\n"
@@ -834,7 +864,7 @@ async def reseller_product_selected(callback: CallbackQuery, state: FSMContext):
 
     stock_display = f"{reseller_stock}" if reseller_stock < 999999 else "🟢 In Stock"
 
-    text = (
+    await callback.message.answer(
         f"🔗 <b>Selected Reseller Product:</b>\n"
         f"<b>{_esc(reseller_product_name)}</b>\n\n"
         f"💰 <b>Provider Cost:</b> ${reseller_cost:.2f}\n"
@@ -844,13 +874,9 @@ async def reseller_product_selected(callback: CallbackQuery, state: FSMContext):
         f"{_divider('─')}\n\n"
         f"💰 <b>Enter your selling price (USD):</b>\n\n"
         f"<i>This is the price your customers will pay in your store.</i>\n"
-        f"<i>Example: 0.99 or 1.50</i>"
+        f"<i>Example: 0.99 or 1.50</i>",
+        parse_mode="HTML"
     )
-
-    try:
-        await callback.message.edit_text(text, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, parse_mode="HTML")
 
     await callback.answer()
 
