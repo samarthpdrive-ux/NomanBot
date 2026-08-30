@@ -1,5 +1,3 @@
-# handlers/products.py
-
 import asyncio
 import json
 import logging
@@ -46,7 +44,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║                     CONFIGURATION                           ║
+# ║                     CONFIGURATION                            ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 PREORDER_MAX_QTY = 10
@@ -71,13 +69,16 @@ GROUP_ID = getattr(config, "GROUP_ID", None)
 GROUP_NOTIFICATIONS = getattr(config, "GROUP_NOTIFICATIONS", False)
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║           RESELLER LIVE STOCK CACHE & HELPERS               ║
+# ║            RESELLER LIVE STOCK CACHE & HELPERS               ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 _reseller_stock_cache: dict[str, int] = {}
 _reseller_stock_cache_time: float = 0.0
 _reseller_cache_lock = asyncio.Lock()
 RESELLER_CACHE_TTL = 30  # 30s TTL to strictly respect rate limits
+
+# Per-user per-provider asynchronous locks for preventing concurrent duplicate fetches
+_provider_fetch_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 
 def _get_reseller_credentials(reseller_id: str | int | None = None) -> dict:
@@ -237,7 +238,7 @@ async def _refresh_reseller_stock_cache_if_needed():
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║                   UI HELPERS                                ║
+# ║                        UI HELPERS                            ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 def _money(value) -> Decimal:
@@ -257,7 +258,7 @@ def _border_box(title: str, emoji: str = "📦") -> str:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║            CATEGORY -> BUTTON STYLE MAPPING                 ║
+# ║            CATEGORY -> BUTTON STYLE MAPPING                  ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 CATEGORY_CONFIG = {
@@ -287,7 +288,7 @@ def _category_style(category: str | None) -> str:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              STOCK DISPLAY HELPERS                          ║
+# ║              STOCK DISPLAY HELPERS                           ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 def _stock_indicator(stock: int) -> str:
@@ -304,7 +305,7 @@ def _stock_indicator(stock: int) -> str:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              BULK PRICING HELPERS                           ║
+# ║              BULK PRICING HELPERS                            ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 def _get_bulk_price(bulk_pricing, quantity: int):
@@ -369,7 +370,7 @@ def _format_bulk_pricing_text(bulk_pricing) -> str:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║                   FSM STATES                                ║
+# ║                        FSM STATES                            ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 class PurchaseStates(StatesGroup):
@@ -381,7 +382,7 @@ class SearchStates(StatesGroup):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║         IN-MEMORY STORES                                    ║
+# ║          IN-MEMORY STORES                                    ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 _notify_subscribers: dict[int, list[int]] = {}
@@ -455,7 +456,7 @@ async def _search_products(query: str) -> list:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              PER-USER PURCHASE LOCK                         ║
+# ║              PER-USER PURCHASE LOCK                          ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 _purchase_locks: dict[int, asyncio.Lock] = {}
@@ -472,7 +473,7 @@ async def _get_purchase_lock(telegram_id: int) -> asyncio.Lock:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              CACHED PRODUCTS FETCH (30s TTL)               ║
+# ║              CACHED PRODUCTS FETCH (30s TTL)                 ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 _products_cache: dict = {"data": None, "timestamp": 0}
@@ -589,7 +590,7 @@ def _get_max_qty(product) -> int:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║      STOCK CHANGE TRACKING — RESTOCK / NEW PRODUCT /        ║
+# ║      STOCK CHANGE TRACKING — RESTOCK / NEW PRODUCT /         ║
 # ║      LIMITED STOCK BROADCASTS (→ STOCK_GROUP_ID, user-facing)║
 # ╚══════════════════════════════════════════════════════════════╝
 
@@ -752,7 +753,7 @@ async def notify_new_product(bot, product):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              FREEBIES MENU                                  ║
+# ║              FREEBIES MENU                                   ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.callback_query(F.data == "freebies_menu")
@@ -820,7 +821,7 @@ async def freebies_menu(callback: CallbackQuery):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              PRODUCTS MENU (PAID ONLY)                      ║
+# ║              PRODUCTS MENU (PAID ONLY)                       ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.callback_query(F.data == "products_menu")
@@ -908,7 +909,7 @@ async def products_menu(callback: CallbackQuery):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              FAVORITES SYSTEM                               ║
+# ║              FAVORITES SYSTEM                                ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.callback_query(F.data.startswith("toggle_fav_"))
@@ -1007,7 +1008,7 @@ async def favorites_menu(callback: CallbackQuery):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              NOTIFY WHEN AVAILABLE                          ║
+# ║              NOTIFY WHEN AVAILABLE                           ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.callback_query(F.data.startswith("notify_available_"))
@@ -1070,7 +1071,7 @@ async def notify_remove(callback: CallbackQuery):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              SEARCH FUNCTIONALITY                           ║
+# ║              SEARCH FUNCTIONALITY                            ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.callback_query(F.data == "search_start")
@@ -1127,7 +1128,7 @@ async def search_results(message: Message, state: FSMContext):
                           parse_mode="HTML",
                           reply_markup=InlineKeyboardMarkup(
                               inline_keyboard=[[InlineKeyboardButton(text="🛍 Browse Products",
-                                                                     callback_data="products_menu", style="success")]]
+                                                                    callback_data="products_menu", style="success")]]
                           ))
         return
 
@@ -1221,7 +1222,7 @@ async def search_results(message: Message, state: FSMContext):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              PRODUCT DETAILS                                ║
+# ║              PRODUCT DETAILS                                 ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.callback_query(F.data.startswith("product_"))
@@ -1353,7 +1354,7 @@ async def product_info(callback: CallbackQuery):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              QUANTITY INPUT + CONFIRM                       ║
+# ║             QUANTITY INPUT + CONFIRM                         ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 def _qty_text(product, qty: int, real_stock_available: bool) -> str:
@@ -1457,9 +1458,9 @@ async def select_qty(callback: CallbackQuery, state: FSMContext):
                    parse_mode="HTML",
                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                        [InlineKeyboardButton(text="🛍 Browse Other Products", callback_data="products_menu",
-                                             style="success")],
+                                            style="success")],
                        [InlineKeyboardButton(text="🔔 Notify When Available",
-                                             callback_data=f"notify_available_{product_id}", style="primary")]
+                                            callback_data=f"notify_available_{product_id}", style="primary")]
                    ]))
         return
 
@@ -1546,7 +1547,7 @@ async def receive_qty(message: Message, state: FSMContext):
                           chat_id=card_chat_id, message_id=card_message_id, parse_mode="HTML",
                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                               [InlineKeyboardButton(text="🛍 Browse Products", callback_data="products_menu",
-                                                    style="primary")]
+                                                   style="primary")]
                           ]))
         return
 
@@ -1590,7 +1591,7 @@ async def cancel_buy(callback: CallbackQuery, state: FSMContext):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              OWN PRODUCT PURCHASE TRANSACTION               ║
+# ║             OWN PRODUCT PURCHASE TRANSACTION                 ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @retry_on_write_conflict(max_attempts=3)
@@ -1611,14 +1612,14 @@ def _do_purchase(telegram_id: int, product_id: int, quantity: int) -> dict:
         if float(product.price) == 0:
             quantity = 1
             already_claimed = (
-                                  db.query(Order)
-                                  .filter(
-                                      Order.telegram_id == telegram_id,
-                                      Order.product_id == product.id,
-                                      Order.status.in_(["completed", "pending_manual", "preorder"]),
-                                      Order.refunded == False
-                                  )
-                                  .count()
+                                      db.query(Order)
+                                      .filter(
+                                          Order.telegram_id == telegram_id,
+                                          Order.product_id == product.id,
+                                          Order.status.in_(["completed", "pending_manual", "preorder"]),
+                                          Order.refunded == False
+                                      )
+                                      .count()
                               ) > 0
             if already_claimed:
                 return {
@@ -1932,7 +1933,7 @@ async def _notify_admins_pending_order(bot, buyer_id: int, result: dict):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║         DELIVERY INSTRUCTION BUTTON HANDLER                 ║
+# ║          DELIVERY INSTRUCTION BUTTON HANDLER                 ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.callback_query(F.data.startswith("delivery_instruction_"))
@@ -1949,7 +1950,7 @@ async def show_delivery_instruction(callback: CallbackQuery):
 
     text = (
         f"╔{'═' * 30}╗\n"
-        f"║  📋 DELIVERY INSTRUCTIONS      ║\n"
+        f"║  📋 DELIVERY INSTRUCTIONS       ║\n"
         f"╚{'═' * 30}╝\n\n"
         f"<b>{product.icon or cat_config['icon']} {_esc(product.name)}</b>\n\n"
         f"{'─' * 30}\n\n"
@@ -1975,7 +1976,7 @@ async def show_delivery_instruction(callback: CallbackQuery):
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              CONFIRM PURCHASE                               ║
+# ║              CONFIRM PURCHASE                                ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @router.callback_query(F.data.startswith("confirm_buy_"))
@@ -2054,12 +2055,12 @@ async def confirm_buy(callback: CallbackQuery, state: FSMContext):
                     f"   💳 <b>Your Balance:</b> <code>${balance:.2f}</code>\n\n"
                     f"{'─' * 30}\n\n"
                     f"💡 <b>What would you like to do?</b>\n\n"
-                    f"  🏦 <b>Deposit Funds</b> — Add money to\n"
-                    f"     your wallet and try again.\n\n"
-                    f"  🛍 <b>Browse Products</b> — Find\n"
-                    f"     something within your budget.\n\n"
-                    f"  🏠 <b>Main Menu</b> — Go back to\n"
-                    f"     the dashboard.\n\n"
+                    f"   🏦 <b>Deposit Funds</b> — Add money to\n"
+                    f"      your wallet and try again.\n\n"
+                    f"   🛍 <b>Browse Products</b> — Find\n"
+                    f"      something within your budget.\n\n"
+                    f"   🏠 <b>Main Menu</b> — Go back to\n"
+                    f"      the dashboard.\n\n"
                     f"{'─' * 30}\n\n"
                     f"⚡ <i>Quick Tip: Top up your balance\n"
                     f"with crypto or fiat in seconds!</i>"
@@ -2137,12 +2138,12 @@ async def confirm_buy(callback: CallbackQuery, state: FSMContext):
                     "<code>$ journalctl --wallet</code>\n"
                     "<code>New wallet event detected.</code>\n"
                     "<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n"
-                    f"<code>ACTION      PURCHASE</code>\n"
-                    f"<code>USER        {masked_uid}</code>\n"
-                    f"<code>PRODUCT     {result['name']}</code>\n"
-                    f"<code>AMOUNT      ${result['total_price']:.2f}</code>\n"
-                    f"<code>ORDER       #{result['order_id']}</code>\n"
-                    f"<code>TIME        {now}</code>\n"
+                    f"<code>ACTION     PURCHASE</code>\n"
+                    f"<code>USER       {masked_uid}</code>\n"
+                    f"<code>PRODUCT    {result['name']}</code>\n"
+                    f"<code>AMOUNT     ${result['total_price']:.2f}</code>\n"
+                    f"<code>ORDER      #{result['order_id']}</code>\n"
+                    f"<code>TIME       {now}</code>\n"
                     "<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n"
                     "<code>Wallet synchronized.</code>"
                 )
@@ -2184,7 +2185,7 @@ async def confirm_buy(callback: CallbackQuery, state: FSMContext):
             if is_free:
                 text = (
                     f"╔{'═' * 34}╗\n"
-                    f"║  🎁 FREEBIE CLAIMED!           ║\n"
+                    f"║  🎁 FREEBIE CLAIMED!            ║\n"
                     f"╚{'═' * 34}╝\n\n"
                     f"🎉 <b>Your free product has been delivered!</b>\n\n"
                     f"{'─' * 34}\n\n"
@@ -2315,7 +2316,7 @@ async def confirm_buy(callback: CallbackQuery, state: FSMContext):
             if has_instr:
                 pending_buttons.insert(0, [
                     InlineKeyboardButton(text="📋 📖 Delivery Instructions",
-                                         callback_data=f"delivery_instruction_{product_id}", style="primary")
+                                          callback_data=f"delivery_instruction_{product_id}", style="primary")
                 ])
             pending_buttons.append(
                 [InlineKeyboardButton(text="🏠 Main Menu", callback_data="main_menu", style="primary")])
