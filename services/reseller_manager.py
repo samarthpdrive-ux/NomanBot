@@ -1,7 +1,7 @@
 """
 Reseller API manager supporting multi-provider architecture.
 
-Compatible with Canboso API, Excalibur Shop Bot API, EM Store, and Generic REST Providers:
+Compatible with Excalibur Shop Bot API, EM Store, Canboso Telegram Buyer API, and Generic REST Providers:
 - Products: GET
 - Balance: GET
 - Order: POST/GET
@@ -114,12 +114,18 @@ class ResellerManager:
             or ""
         ).lower()
 
+        is_em_store = (
+                "em_store" in self.provider_id.lower()
+                or "ssondigitalworks" in self.base_url
+        )
         is_canboso = "canboso.com" in self.base_url.lower()
 
         if raw_auth_type:
             self.auth_type = raw_auth_type
         elif is_canboso:
             self.auth_type = "query"
+        elif is_em_store:
+            self.auth_type = "bearer"
         else:
             self.auth_type = "header"
 
@@ -132,7 +138,7 @@ class ResellerManager:
         self.auth_query_param = str(
             self.config_dict.get("auth_query_param")
             or getattr(self.config, "auth_query_param", None)
-            or "key"
+            or ("key" if is_canboso else "key")
         )
 
     def __repr__(self) -> str:
@@ -382,36 +388,15 @@ class ResellerManager:
                 self._session = None
 
     async def get_me(self) -> dict[str, Any]:
-        """Fetch account metadata from provider with extensive fallback and multi-endpoint support."""
+        """Fetch account metadata from provider."""
         is_canboso = "canboso.com" in self.base_url.lower()
-        endpoints_to_try = []
-        
-        primary_ep, primary_method = self._get_endpoint_and_method("me", "/api/v2/telegram-buyer/balance" if is_canboso else "/api/v1/me", "GET")
-        endpoints_to_try.append((primary_ep, primary_method))
-        
-        # Add fallback endpoints for robust auto-discovery across different reseller panel versions
-        for fallback in ("/api/v1/me", "/api/v2/me", "/api/user", "/api/v1/user", "/api/v2/telegram-buyer/balance", "/api/v1/profile"):
-            if fallback != primary_ep:
-                endpoints_to_try.append((fallback, "GET"))
-
-        last_error = None
-        for ep, meth in endpoints_to_try:
-            try:
-                res = await self._request(meth, ep, feature_name="me")
-                if isinstance(res, dict) and res:
-                    return res
-                elif res:
-                    return {"response": res}
-            except Exception as e:
-                last_error = e
-                continue
-
-        if last_error:
-            raise last_error
-        return {}
+        default_ep = "/api/v2/telegram-buyer/balance" if is_canboso else "/api/v1/me"
+        endpoint, method = self._get_endpoint_and_method("me", default_ep, "GET")
+        res = await self._request(method, endpoint, feature_name="me")
+        return res if isinstance(res, dict) else {"response": res}
 
     async def get_balance(self) -> Decimal:
-        """Fetch balance from configured endpoint with automatic fallback extraction."""
+        """Fetch balance from configured endpoint."""
         is_em_store = (
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
@@ -427,15 +412,7 @@ class ResellerManager:
 
         endpoint, method = self._get_endpoint_and_method("balance", default_ep, "GET")
 
-        try:
-            data = await self._request(method, endpoint, feature_name="balance")
-        except Exception:
-            # Try fallback balance endpoint if primary fails
-            try:
-                endpoint, method = self._get_endpoint_and_method("me", "/api/v1/me", "GET")
-                data = await self._request(method, endpoint, feature_name="balance")
-            except Exception:
-                return Decimal("0.00")
+        data = await self._request(method, endpoint, feature_name="balance")
 
         if not data:
             return Decimal("0.00")
@@ -463,7 +440,7 @@ class ResellerManager:
         return Decimal("0.00")
 
     async def get_products(self) -> list[dict[str, Any]]:
-        """Fetch complete products catalog from provider with multi-endpoint fallback discovery."""
+        """Fetch complete products catalog from provider."""
         is_em_store = (
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
@@ -477,30 +454,11 @@ class ResellerManager:
         else:
             default_ep = "/api/v1/products"
 
-        primary_ep, primary_method = self._get_endpoint_and_method("products", default_ep, "GET")
-        
-        endpoints_to_try = [(primary_ep, primary_method)]
-        for fb in ("/api/v2/telegram-buyer/products", "/api/v1/products", "/api/products", "/api/v2/products", "/api/services"):
-            if fb != primary_ep:
-                endpoints_to_try.append((fb, "GET"))
+        endpoint, method = self._get_endpoint_and_method("products", default_ep, "GET")
 
-        response = None
-        last_error = None
-        for ep, meth in endpoints_to_try:
-            try:
-                response = await self._request(meth, ep, feature_name="products")
-                if response:
-                    break
-            except Exception as e:
-                last_error = e
-                continue
+        response = await self._request(method, endpoint, feature_name="products")
 
-        if response is None:
-            if last_error:
-                raise last_error
-            raise ResellerAPIError(message="Provider returned empty product response.", provider_id=self.provider_id)
-
-        if isinstance(response, dict):
+        if is_canboso and isinstance(response, dict):
             if response.get("success") is False:
                 msg = response.get("message") or response.get("error") or "API returned failure."
                 raise ResellerAPIError(message=str(msg), provider_id=self.provider_id)
@@ -613,10 +571,7 @@ class ResellerManager:
                         break
 
             try:
-                if isinstance(raw_price, dict):
-                    price = Decimal(str(raw_price.get("amount", "0.00")))
-                else:
-                    price = Decimal(str(raw_price).strip()) if raw_price is not None else Decimal("0.00")
+                price = Decimal(str(raw_price).strip()) if raw_price is not None else Decimal("0.00")
             except (InvalidOperation, TypeError, ValueError):
                 price = Decimal("0.00")
 
