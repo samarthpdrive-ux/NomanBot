@@ -299,6 +299,18 @@ def _get_all_active_providers(db) -> list[dict]:
                 "type": "reseller",
             })
 
+    # Hardcoded safety fallback for Rain Deals if configured via environment or user setup
+    if not any(str(p["id"]) == "rain_deals" for p in providers):
+        providers.append({
+            "id": "rain_deals",
+            "name": "Rain Deals",
+            "base_url": "https://canboso.com",
+            "api_key": RESELLER_API_KEY,
+            "type": "reseller",
+            "auth_type": "query",
+            "auth_query_param": "key"
+        })
+
     return providers
 
 
@@ -612,22 +624,35 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         )
 
         try:
-            manager = ResellerManager(api_key=api_key, base_url=base_url, provider_config=prov)
-            products = await manager.get_products()
-        except ResellerAPIError as e:
-            logger.error("Diagnostic ResellerAPIError for provider=%s: %s", prov_id, str(e))
+            async with asyncio.timeout(20):
+                manager = ResellerManager(api_key=api_key, base_url=base_url, provider_config=prov)
+                products = await manager.get_products()
+        except asyncio.TimeoutError:
+            logger.error("Provider request timed out for provider_id=%s", prov_id)
             try:
                 await callback.message.edit_text(
-                    f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(str(e))}</code>\n\n"
-                    "Please check API key and provider settings.",
+                    f"❌ <b>Connection Timeout:</b> Could not reach provider {_esc(reseller_name)} within timeout.",
                     parse_mode="HTML"
                 )
             except Exception:
                 await callback.message.answer(
-                    f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(str(e))}</code>\n\n"
-                    "Please check API key and provider settings.",
+                    f"❌ <b>Connection Timeout:</b> Could not reach provider {_esc(reseller_name)} within timeout.",
                     parse_mode="HTML"
                 )
+            return
+        except ResellerAPIError as e:
+            logger.error("Diagnostic ResellerAPIError for provider=%s: %s", prov_id, str(e))
+            err_text = str(e)
+            if "HTTP 401" in err_text or "authentication" in err_text.lower() or "hop le" in err_text.lower() or "khong hop le" in err_text.lower():
+                display_msg = f"Rain Deals API authentication failed: {err_text}"
+            else:
+                display_msg = f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(err_text)}</code>\n\n" \
+                              "Please check API key and provider settings."
+
+            try:
+                await callback.message.edit_text(display_msg, parse_mode="HTML")
+            except Exception:
+                await callback.message.answer(display_msg, parse_mode="HTML")
             return
         except Exception as e:
             logger.error("Diagnostic Connection Error for provider=%s: %s", prov_id, str(e))
