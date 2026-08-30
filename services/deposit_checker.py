@@ -43,7 +43,7 @@ Binance Pay:
 """
 
 from __future__ import annotations
-
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 import email
 import hashlib
@@ -2015,117 +2015,94 @@ async def verify_binance_pay_order(
 # INR / UPI CONVERSION
 # ================================================================
 
+# ================================================================
+# INR / UPI CONVERSION (CurrencyAPI Multi-Key Integration)
+# ================================================================
+
 _usdt_inr_rate_cache = {
     "rate": None,
     "last_updated": None,
-    "ttl_seconds": 300,
+    "ttl_seconds": 1200,  # Matches CURRENCY_RATE_CACHE_MINUTES (20 mins)
 }
 
+_current_api_key_index = 0
 
-def _get_usdt_inr_rate():
 
+def _get_usdt_inr_rate() -> Decimal:
+    global _current_api_key_index
     now = time_module.time()
-
     cache = _usdt_inr_rate_cache
 
     if (
-        cache["rate"] is not None
-        and cache["last_updated"] is not None
-        and (
-            now
-            - cache["last_updated"]
-        )
-        < cache["ttl_seconds"]
+            cache["rate"] is not None
+            and cache["last_updated"] is not None
+            and (now - cache["last_updated"]) < cache["ttl_seconds"]
     ):
-
         return cache["rate"]
 
+    api_keys = getattr(config, "CURRENCY_API_KEYS", [])
+    base_url = getattr(config, "CURRENCY_API_URL", "https://api.currencyapi.com/v3/latest")
+
+    # Try CurrencyAPI keys first if available
+    if api_keys:
+        num_keys = len(api_keys)
+        for _ in range(num_keys):
+            current_key = api_keys[_current_api_key_index]
+            try:
+                response = requests.get(
+                    base_url,
+                    params={
+                        "apikey": current_key,
+                        "base_currency": "USD",
+                        "currencies": "INR"
+                    },
+                    timeout=getattr(config, "CURRENCY_REQUEST_TIMEOUT", 10)
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    inr_data = data.get("data", {}).get("INR", {})
+                    rate_val = inr_data.get("value")
+
+                    if rate_val:
+                        rate = Decimal(str(rate_val))
+                        if rate > 0:
+                            cache["rate"] = rate
+                            cache["last_updated"] = now
+                            return rate
+                elif response.status_code in (401, 403, 429) and getattr(config, "CURRENCY_ROTATE_KEYS_ON_ERROR", True):
+                    # Rotate key on rate limit or auth error
+                    _current_api_key_index = (_current_api_key_index + 1) % num_keys
+            except Exception:
+                pass
+
+            # Move to next key for subsequent attempts if rotate is enabled
+            if getattr(config, "CURRENCY_ROTATE_KEYS_ON_ERROR", True):
+                _current_api_key_index = (_current_api_key_index + 1) % num_keys
+
+    # Fallback to Binance ticker if CurrencyAPI fails
     client = _get_binance_client()
-
     if client is not None:
-
         try:
-
-            rate = Decimal(
-                str(
-                    client.get_symbol_ticker(
-                        symbol="USDTINR"
-                    )["price"]
-                )
-            )
-
-            cache["rate"] = rate
-            cache["last_updated"] = now
-
-            return rate
-
-        except Exception:
-            pass
-
-        try:
-
-            btc_inr = Decimal(
-                str(
-                    client.get_symbol_ticker(
-                        symbol="BTCINR"
-                    )["price"]
-                )
-            )
-
-            btc_usdt = Decimal(
-                str(
-                    client.get_symbol_ticker(
-                        symbol="BTCUSDT"
-                    )["price"]
-                )
-            )
-
-            if (
-                btc_inr > 0
-                and btc_usdt > 0
-            ):
-
-                rate = (
-                    btc_inr
-                    / btc_usdt
-                ).quantize(
-                    Decimal("0.01")
-                )
-
+            rate = Decimal(str(client.get_symbol_ticker(symbol="USDTINR")["price"]))
+            if rate > 0:
                 cache["rate"] = rate
                 cache["last_updated"] = now
-
                 return rate
-
         except Exception:
             pass
 
-    return Decimal(
-        str(
-            getattr(
-                config,
-                "UPI_USDT_INR_RATE",
-                95.0,
-            )
-        )
-    )
+    # Fallback rate configured in config.py
+    return Decimal(str(getattr(config, "UPI_USDT_INR_RATE", 95.0)))
 
 
-def convert_inr_to_usdt(
-    inr_amount: Decimal,
-):
-
+def convert_inr_to_usdt(inr_amount: Decimal) -> Decimal:
     rate = _get_usdt_inr_rate()
-
     if rate <= 0:
         return Decimal("0")
 
-    return (
-        inr_amount / rate
-    ).quantize(
-        Decimal("0.000001")
-    )
-
+    # Accurate conversion: Dividing INR by USD-INR exchange rate
+    return (inr_amount / rate).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 # ================================================================
 # CREDIT USER
