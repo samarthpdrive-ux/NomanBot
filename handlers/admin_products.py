@@ -208,12 +208,12 @@ def _get_all_active_providers(db) -> list[dict]:
     """
     Fetch all active providers dynamically from database models (Provider, Reseller)
     or reseller_config services, falling back to config.py if necessary.
-    NO hardcoded providers.
+    Completely dynamic with zero hardcoded provider names.
     """
     providers = []
     seen_ids = set()
 
-    # 1. Try querying Provider model if available
+    # 1. Query Provider model dynamically
     if Provider is not None:
         try:
             db_providers = db.query(Provider).filter(getattr(Provider, "is_active", True) == True).all()
@@ -233,7 +233,7 @@ def _get_all_active_providers(db) -> list[dict]:
         except Exception:
             pass
 
-    # 2. Try querying Reseller model if available
+    # 2. Query Reseller model dynamically
     if Reseller is not None:
         try:
             db_resellers = db.query(Reseller).filter(getattr(Reseller, "is_active", True) == True).all()
@@ -253,7 +253,7 @@ def _get_all_active_providers(db) -> list[dict]:
         except Exception:
             pass
 
-    # 3. Try get_all_resellers() from services.reseller_config if available
+    # 3. Query get_all_resellers() service dynamically if available
     if get_all_resellers:
         try:
             all_res = get_all_resellers()
@@ -277,7 +277,7 @@ def _get_all_active_providers(db) -> list[dict]:
                             seen_ids.add(key_str)
             elif isinstance(all_res, list):
                 for res in all_res:
-                    rid = str(getattr(res, "id", None) or (res.get("id") if isinstance(res, dict) else "excalibur"))
+                    rid = str(getattr(res, "id", None) or (res.get("id") if isinstance(res, dict) else "default"))
                     if rid not in seen_ids:
                         b_url = getattr(res, "base_url", None) or (res.get("base_url") if isinstance(res, dict) else "")
                         a_key = getattr(res, "api_key", None) or (res.get("api_key") if isinstance(res, dict) else "")
@@ -296,13 +296,13 @@ def _get_all_active_providers(db) -> list[dict]:
         except Exception:
             pass
 
-    # 4. Default fallback to config.py if no DB/config providers found and config exists
+    # 4. Fallback to config.py environment defaults if database is empty
     if not providers and RESELLER_BASE_URL and RESELLER_API_KEY:
         clean_url = RESELLER_BASE_URL.replace("/docs", "").rstrip("/")
         if clean_url:
             providers.append({
-                "id": "excalibur",
-                "name": "Excalibur",
+                "id": "default_reseller",
+                "name": "Default Provider",
                 "base_url": clean_url,
                 "api_key": RESELLER_API_KEY,
                 "type": "reseller",
@@ -347,10 +347,10 @@ def _get_reseller_credentials(reseller_id: str | None = None) -> dict:
 
     clean_base_url = (RESELLER_BASE_URL or "").replace("/docs", "").rstrip("/")
     return {
-        "id": "excalibur",
+        "id": "default_reseller",
         "base_url": clean_base_url,
         "api_key": RESELLER_API_KEY,
-        "name": "Excalibur Shop Bot",
+        "name": "Default Provider",
         "auth_type": "header",
     }
 
@@ -554,6 +554,7 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
     lock = _provider_fetch_locks[lock_key]
 
     if lock.locked():
+        await callback.answer("⏳ Fetch already in progress...", show_alert=True)
         return
 
     async with lock:
@@ -643,11 +644,8 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         except ResellerAPIError as e:
             logger.error("Diagnostic ResellerAPIError for provider=%s: %s", prov_id, str(e))
             err_text = str(e)
-            if "HTTP 401" in err_text or "authentication" in err_text.lower() or "hop le" in err_text.lower() or "khong hop le" in err_text.lower():
-                display_msg = f"API authentication failed for {_esc(reseller_name)}: {err_text}"
-            else:
-                display_msg = f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(err_text)}</code>\n\n" \
-                              "Please check API key and provider settings."
+            display_msg = f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(err_text)}</code>\n\n" \
+                          "Please check API key and provider settings."
 
             try:
                 await callback.message.edit_text(display_msg, parse_mode="HTML")
