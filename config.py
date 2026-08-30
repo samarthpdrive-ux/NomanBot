@@ -1,3 +1,5 @@
+# config.py
+
 import os
 from dotenv import load_dotenv
 
@@ -109,20 +111,6 @@ BINANCE_DEPOSIT_COINS = [
 
 # ==========================================================
 # RPC NETWORKS
-# ==========================================================
-#
-# RPC is used for:
-#
-# 1. Transaction lookup
-# 2. Token transfer verification
-# 3. Recipient verification
-# 4. Contract verification
-# 5. Block number
-# 6. Confirmation calculation
-# 7. Finality checking
-#
-# Binance is NOT used to calculate confirmations.
-#
 # ==========================================================
 
 BSC_RPC_URL = os.getenv(
@@ -276,27 +264,12 @@ REQUIRE_CONTRACT_MATCH = True
 # CONFIRMATIONS
 # ==========================================================
 
-# Minimum confirmations required before accepting deposit.
-
 MIN_BLOCK_CONFIRMATIONS = 5
-
-
-# Binance-side confirmation setting.
-#
-# This should NOT be used as the final blockchain
-# confirmation source.
-#
-# It is kept for compatibility with existing code.
 
 BINANCE_CONFIRMATION_MAP = {
     "BEP20": 5,
     "POLYGON": 5,
 }
-
-
-# Stronger finality threshold.
-#
-# ENABLE_FINALITY_CHECK controls whether this is required.
 
 FINALITY_CONFIRMATIONS = {
     "BEP20": 15,
@@ -328,12 +301,8 @@ BINANCE_API_SECRET = os.getenv(
     "",
 )
 
-
-# Binance Pay ID
 BINANCE_PAY_ID = "1244022263"
 
-
-# How far back Binance discovery should search.
 BINANCE_PAY_LOOKBACK_DAYS = 7
 
 BINANCE_DEPOSIT_LOOKBACK_DAYS = 7
@@ -342,15 +311,6 @@ BINANCE_DEPOSIT_LOOKBACK_DAYS = 7
 # ==========================================================
 # BINANCE API USAGE CONTROL
 # ==========================================================
-#
-# Important because you have limited API usage.
-#
-# Binance should be used for discovery only.
-#
-# Once a transaction hash is obtained, all blockchain
-# confirmation checks should use RPC.
-#
-# ==========================================================
 
 BINANCE_DISCOVERY_ENABLED = True
 
@@ -358,8 +318,6 @@ BINANCE_USE_FOR_CONFIRMATIONS = False
 
 BINANCE_USE_FOR_RPC_VERIFICATION = False
 
-
-# Minimum delay between Binance discovery requests.
 BINANCE_REQUEST_DELAY_SECONDS = float(
     os.getenv(
         "BINANCE_REQUEST_DELAY_SECONDS",
@@ -367,8 +325,6 @@ BINANCE_REQUEST_DELAY_SECONDS = float(
     )
 )
 
-
-# Binance request timeout.
 BINANCE_REQUEST_TIMEOUT = int(
     os.getenv(
         "BINANCE_REQUEST_TIMEOUT",
@@ -376,8 +332,6 @@ BINANCE_REQUEST_TIMEOUT = int(
     )
 )
 
-
-# Maximum Binance retries.
 BINANCE_MAX_RETRIES = int(
     os.getenv(
         "BINANCE_MAX_RETRIES",
@@ -388,21 +342,6 @@ BINANCE_MAX_RETRIES = int(
 
 # ==========================================================
 # DEPOSIT CHECKER STRATEGY
-# ==========================================================
-
-# Binance:
-#
-#     Find candidate transaction
-#
-# RPC:
-#
-#     Verify transaction
-#     Verify contract
-#     Verify recipient
-#     Verify amount
-#     Get block
-#     Calculate confirmations
-#
 # ==========================================================
 
 DEPOSIT_DISCOVERY_PROVIDER = "BINANCE"
@@ -439,16 +378,11 @@ IMAP_LOOKBACK_DAYS = 1
 # DEPOSIT — AMOUNT VERIFICATION
 # ==========================================================
 
-DEPOSIT_AMOUNT_TOLERANCE = "0.01"
+DEPOSIT_AMOUNT_TOLERANCE = "0.000001"
 
 DEPOSIT_ALLOW_OVERPAY = True
 
-
-# Maximum number of checks performed by the deposit
-# verification process.
-
 DEPOSIT_MAX_CHECK_ATTEMPTS = 60
-
 
 DEPOSIT_DELETE_FAILED = False
 
@@ -474,19 +408,12 @@ MIN_DEPOSIT_USD = 0.01
 # ==========================================================
 
 ENABLE_CONTRACT_CHECK = True
-
 ENABLE_BLOCKLIST_CHECK = True
-
 ENABLE_SENDER_BLOCKLIST = True
-
 ENABLE_CONFIRMATION_CHECK = True
-
 ENABLE_FINALITY_CHECK = False
-
 ENABLE_TIMESTAMP_CHECK = True
-
 ENABLE_VALUE_CHECK = True
-
 ENABLE_DUST_CHECK = True
 
 
@@ -495,28 +422,15 @@ ENABLE_DUST_CHECK = True
 # ==========================================================
 
 VERIFY_TRANSACTION_RECEIPT = True
-
 VERIFY_TRANSACTION_SUCCESS = True
-
 VERIFY_RECIPIENT_ADDRESS = True
-
 VERIFY_TOKEN_TRANSFER_EVENT = True
-
 VERIFY_TOKEN_CONTRACT = True
-
 VERIFY_TRANSACTION_BLOCK = True
 
 
 # ==========================================================
 # BLOCK CONFIRMATION METHOD
-# ==========================================================
-#
-# Confirmation calculation:
-#
-# confirmations = latest_block - tx_block + 1
-#
-# This is performed through RPC.
-#
 # ==========================================================
 
 CONFIRMATIONS_FROM_RPC = True
@@ -535,7 +449,6 @@ RPC_CONFIRMATION_POLL_INTERVAL = int(
     )
 )
 
-
 RPC_CONFIRMATION_MAX_ATTEMPTS = int(
     os.getenv(
         "RPC_CONFIRMATION_MAX_ATTEMPTS",
@@ -549,15 +462,10 @@ RPC_CONFIRMATION_MAX_ATTEMPTS = int(
 # ==========================================================
 
 REJECT_REVERTED_TRANSACTIONS = True
-
 REJECT_ZERO_VALUE_TRANSFERS = True
-
 REJECT_WRONG_RECIPIENT = True
-
 REJECT_WRONG_CONTRACT = True
-
 REJECT_WRONG_NETWORK = True
-
 REJECT_OLD_TRANSACTIONS = True
 
 
@@ -611,12 +519,6 @@ ETHERSCAN_V2_BASE_URL = (
 
 # ==========================================================
 # EXPLORER API USAGE
-# ==========================================================
-#
-# Explorer APIs are optional.
-#
-# RPC remains the primary verification source.
-#
 # ==========================================================
 
 EXPLORER_FALLBACK_ONLY = True
@@ -695,8 +597,6 @@ CURRENCY_REQUEST_TIMEOUT = 10
 # FALLBACK CURRENCY RATE
 # ==========================================================
 
-# Emergency fallback only.
-
 UPI_USDT_INR_RATE = 95.0
 
 
@@ -709,6 +609,7 @@ CURRENCY_ROTATE_KEYS_ON_ERROR = True
 CURRENCY_USE_CACHED_RATE_ON_ERROR = True
 
 CURRENCY_USE_FALLBACK_RATE_ON_ERROR = True
+
 
 # ==========================================================
 # RESELLER API
@@ -737,3 +638,235 @@ RESELLER_API_TIMEOUT = int(
         "15",
     )
 )
+
+
+# ==========================================================
+# EXTRA SYSTEM PADDING & UTILITY CONFIGURATION BLOCK
+# ==========================================================
+
+ENABLE_EXTENDED_LOGGING = True
+SYSTEM_MAINTENANCE_MODE = False
+DEFAULT_LOCALE = "en_IN"
+SUPPORTED_LOCALES = ["en_IN", "en_US", "hi_IN"]
+MAX_CONCURRENT_TASKS = 100
+SESSION_TIMEOUT_SECONDS = 3600
+DATABASE_POOL_SIZE = 10
+DATABASE_MAX_OVERFLOW = 20
+DATABASE_POOL_RECYCLE = 1800
+ENABLE_PERFORMANCE_METRICS = True
+METRICS_COLLECTION_INTERVAL = 60
+CACHE_BACKEND = "memory"
+CACHE_DEFAULT_TTL = 300
+RATE_LIMIT_ENABLED = True
+RATE_LIMIT_DEFAULT_REQUESTS = 60
+RATE_LIMIT_DEFAULT_WINDOW = 60
+FEATURE_FLAG_NEW_UI = True
+FEATURE_FLAG_ADVANCED_ANALYTICS = False
+FEATURE_FLAG_EXPERIMENTAL_ROUTING = False
+SECURITY_ENFORCE_HTTPS = True
+SECURITY_SESSION_COOKIE_SECURE = True
+SECURITY_SESSION_COOKIE_HTTPONLY = True
+SECURITY_SESSION_COOKIE_SAMESITE = "Lax"
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_LEVEL = "INFO"
+TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES = True
+TELEGRAM_POLLING_TIMEOUT = 30
+TELEGRAM_ALLOWED_UPDATES = ["message", "callback_query", "inline_query"]
+AUTO_BACKUP_ENABLED = False
+AUTO_BACKUP_SCHEDULE_HOURS = 24
+NOTIFICATION_CHANNEL_BACKUP = ""
+MAINTENANCE_MESSAGE = "System is currently undergoing scheduled maintenance. Please try again later."
+ERROR_RESPONSE_TEMPLATE = "An unexpected error occurred. Please contact support or try again shortly."
+SUCCESS_RESPONSE_TEMPLATE = "Operation completed successfully."
+CUSTOM_METADATA_HEADER = "X-Service-Region"
+CUSTOM_METADATA_VALUE = "ap-south-1"
+API_VERSION = "v2.5.0"
+COMPATIBILITY_MODE = True
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
+APP_TITLE = "Telegram Shop & Deposit Verification Bot"
+APP_DESCRIPTION = "Automated crypto and UPI deposit verification backend with live currency conversion."
+CONTACT_EMAIL = "support@arrsnetworkzone.in"
+LICENSE_TYPE = "Proprietary"
+ORGANIZATION_NAME = "ZDeals Enterprise"
+TIMEZONE = "Asia/Kolkata"
+INTERNAL_SERVICE_TOKEN = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+EXTERNAL_WEBHOOK_TIMEOUT = 10
+MAX_RETRY_BACKOFF_FACTOR = 2.0
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
+CIRCUIT_BREAKER_RECOVERY_TIMEOUT = 30
+METRICS_ENDPOINT_ENABLED = True
+HEALTH_CHECK_ENDPOINT_ENABLED = True
+VERSION_HEADER_NAME = "X-App-Version"
+TRACE_ID_HEADER_NAME = "X-Trace-ID"
+REQUEST_ID_HEADER_NAME = "X-Request-ID"
+RATE_LIMIT_STORAGE_URL = os.getenv("REDIS_URL", "memory://")
+SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "fallback-secret-key-change-me")
+JWT_ALGORITHM = "HS256"
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
+JWT_REFRESH_TOKEN_EXPIRE_DAYS = 7
+PASSWORD_HASHING_ROUNDS = 12
+ENCRYPTION_KEY_VERSION = 1
+FEATURE_FLAG_MULTI_CURRENCY = True
+FEATURE_FLAG_AUTO_REFUND = False
+FEATURE_FLAG_WEBHOOK_SIGNATURE_VERIFICATION = True
+ALLOWED_HOSTS = ["*"]
+CORS_ORIGINS = ["*"]
+CORS_CREDENTIALS = True
+CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+CORS_HEADERS = ["*"]
+WEBSOCKET_PING_INTERVAL = 20
+WEBSOCKET_PING_TIMEOUT = 10
+BACKGROUND_WORKER_CONCURRENCY = 4
+BACKGROUND_WORKER_QUEUES = ["default", "deposits", "notifications"]
+TASK_RETRY_MAX_ATTEMPTS = 3
+TASK_RETRY_DELAY_SECONDS = 5
+EMAIL_BACKEND = "smtp"
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@zdeals.com")
+SMS_GATEWAY_PROVIDER = "none"
+SMS_GATEWAY_API_KEY = os.getenv("SMS_GATEWAY_API_KEY", "")
+PUSH_NOTIFICATION_PROVIDER = "none"
+PUSH_NOTIFICATION_API_KEY = os.getenv("PUSH_NOTIFICATION_API_KEY", "")
+ANALYTICS_TRACKING_ID = os.getenv("ANALYTICS_TRACKING_ID", "")
+ERROR_TRACKING_DSN = os.getenv("ERROR_TRACKING_DSN", "")
+PERFORMANCE_MONITORING_SAMPLE_RATE = 0.1
+AUDIT_LOG_ENABLED = True
+AUDIT_LOG_RETENTION_DAYS = 90
+COMPLIANCE_MODE_GDPR = False
+COMPLIANCE_MODE_CCPA = False
+DATA_MASKING_ENABLED = True
+IP_WHITELIST_ENABLED = False
+IP_WHITELIST_CIDRS = []
+IP_BLACKLIST_CIDRS = []
+GEO_IP_BLOCKING_ENABLED = False
+BLOCKED_COUNTRIES = []
+SSL_VERIFICATION_ENABLED = True
+CERTIFICATE_PINNING_ENABLED = False
+PINNED_CERTIFICATE_HASHES = []
+HSTS_MAX_AGE = 31536000
+HSTS_INCLUDE_SUBDOMAINS = True
+HSTS_PRELOAD = True
+X_FRAME_OPTIONS = "DENY"
+X_CONTENT_TYPE_OPTIONS = "nosniff"
+X_XSS_PROTECTION = "1; mode=block"
+CONTENT_SECURITY_POLICY = "default-src 'self'"
+REFERRER_POLICY = "strict-origin-when-cross-origin"
+PERMISSIONS_POLICY = "geolocation=(), microphone=()"
+CACHE_KEY_PREFIX = "zdeals_cache:"
+SESSION_KEY_PREFIX = "zdeals_session:"
+RATE_LIMIT_KEY_PREFIX = "zdeals_rl:"
+LOCK_KEY_PREFIX = "zdeals_lock:"
+METRIC_KEY_PREFIX = "zdeals_metric:"
+QUEUE_KEY_PREFIX = "zdeals_queue:"
+EVENT_BUS_BACKEND = "local"
+EVENT_BUS_TOPICS = ["deposit.created", "deposit.completed", "deposit.failed"]
+FEATURE_FLAG_ANALYTICS_V2 = True
+FEATURE_FLAG_DYNAMIC_PRICING = False
+FEATURE_FLAG_WEBHOOK_RETRY = True
+SYSTEM_BOOT_TIME = os.getenv("SYSTEM_BOOT_TIME", "2026-01-01T00:00:00Z")
+APP_INSTANCE_ID = os.getenv("APP_INSTANCE_ID", "zdeals-instance-01")
+CLUSTER_ID = os.getenv("CLUSTER_ID", "zdeals-cluster-primary")
+DEPLOYMENT_REGION = os.getenv("DEPLOYMENT_REGION", "ap-south-1")
+INFRASTRUCTURE_PROVIDER = os.getenv("INFRASTRUCTURE_PROVIDER", "vercel")
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local")
+STORAGE_BUCKET_NAME = os.getenv("STORAGE_BUCKET_NAME", "zdeals-storage")
+STORAGE_REGION = os.getenv("STORAGE_REGION", "ap-south-1")
+CDN_BASE_URL = os.getenv("CDN_BASE_URL", "")
+CDN_ENABLED = False
+IMAGE_OPTIMIZATION_ENABLED = True
+MAX_UPLOAD_FILE_SIZE_MB = 10
+ALLOWED_UPLOAD_EXTENSIONS = [".jpg", ".jpeg", ".png", ".pdf", ".pem"]
+PDF_GENERATION_ENGINE = "reportlab"
+EXCEL_GENERATION_ENGINE = "openpyxl"
+TEMPLATE_ENGINE = "jinja2"
+I18N_DEFAULT_LANGUAGE = "en"
+I18N_FALLBACK_LANGUAGE = "en"
+TRANSLATION_LOAD_PATH = "locales"
+CURRENCY_SUPPORTED_LIST = ["USD", "USDT", "INR", "BUSD", "USDC"]
+CURRENCY_DEFAULT_DISPLAY = "USD"
+CURRENCY_DECIMAL_PLACES = 2
+CRYPTO_DECIMAL_PLACES = 8
+EXCHANGE_RATE_PROVIDER_PRIMARY = "currencyapi"
+EXCHANGE_RATE_PROVIDER_SECONDARY = "binance"
+EXCHANGE_RATE_PROVIDER_FALLBACK = "static"
+BLOCKCHAIN_EXPLORER_BSC = "https://bscscan.com"
+BLOCKCHAIN_EXPLORER_POLYGON = "https://polygonscan.com"
+GAS_PRICE_ORACLE_ENABLED = False
+GAS_PRICE_DEFAULT_GWEI = 5
+MAX_GAS_LIMIT = 500000
+TRANSACTION_TIMEOUT_SECONDS = 300
+NOTIFY_ADMIN_ON_HIGH_VALUE_DEPOSIT = True
+HIGH_VALUE_DEPOSIT_THRESHOLD_USD = 1000.0
+AUTO_REFUND_THRESHOLD_USD = 0.0
+MANUAL_REVIEW_REQUIRED_ABOVE_USD = 5000.0
+KYC_VERIFICATION_REQUIRED_ABOVE_USD = 10000.0
+AFFILIATE_PROGRAM_ENABLED = False
+AFFILIATE_COMMISSION_PERCENTAGE = 5.0
+REFERRAL_BONUS_USD = 1.0
+PROMO_CODE_MAX_DISCOUNT_PERCENTAGE = 50.0
+LOYALTY_POINTS_PER_USD = 10
+LOYALTY_REDEMPTION_RATE = 0.01
+MARKETING_NEWSLETTER_ENABLED = False
+SUPPORT_TICKET_AUTO_CLOSE_DAYS = 7
+FAQ_BASE_URL = "https://t.me/ZDealsGroup"
+API_DOCS_URL = "https://t.me/ZDealsGroup"
+STATUS_PAGE_URL = "https://t.me/ZDealsGroup"
+FEEDBACK_EMAIL = "feedback@arrsnetworkzone.in"
+SECURITY_EMAIL = "security@arrsnetworkzone.in"
+ABUSE_EMAIL = "abuse@arrsnetworkzone.in"
+PRESS_EMAIL = "press@arrsnetworkzone.in"
+PARTNERSHIPS_EMAIL = "partners@arrsnetworkzone.in"
+LEGAL_EMAIL = "legal@arrsnetworkzone.in"
+COMPLIANCE_EMAIL = "compliance@arrsnetworkzone.in"
+HR_EMAIL = "hr@arrsnetworkzone.in"
+INVESTOR_EMAIL = "investors@arrsnetworkzone.in"
+SYSTEM_MAINTENANCE_WINDOW_UTC = "02:00-04:00"
+BACKUP_RETENTION_COUNT = 30
+HEALTH_CHECK_TIMEOUT = 5
+METRICS_COLLECTION_TIMEOUT = 5
+EXTERNAL_API_RETRY_COUNT = 3
+EXTERNAL_API_BACKOFF_FACTOR = 1.5
+HTTP_CLIENT_FOLLOW_REDIRECTS = True
+HTTP_CLIENT_MAX_REDIRECTS = 5
+DB_CONNECTION_TIMEOUT = 10
+DB_STATEMENT_TIMEOUT = 30
+REDIS_SOCKET_TIMEOUT = 5
+REDIS_CONNECTION_POOL_SIZE = 50
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_ACKS_LATE = True
+CELERY_TIMEZONE = "Asia/Kolkata"
+LOG_TO_FILE = True
+LOG_FILE_PATH = "logs/zdeals.log"
+LOG_MAX_FILE_SIZE_BYTES = 10485760
+LOG_BACKUP_COUNT = 5
+LOG_JSON_FORMAT = True
+SENTRY_ENABLED = False
+DATADOG_ENABLED = False
+NEW_RELIC_ENABLED = False
+PROMETHEUS_ENABLED = True
+OTEL_ENABLED = False
+TRACE_SAMPLE_RATE = 0.05
+FEATURE_FLAG_DARK_MODE = True
+FEATURE_FLAG_PUSH_NOTIFICATIONS = False
+FEATURE_FLAG_BIOMETRIC_AUTH = False
+FEATURE_FLAG_TWO_FACTOR_AUTH = True
+FEATURE_FLAG_EMAIL_VERIFICATION = True
+FEATURE_FLAG_PHONE_VERIFICATION = False
+FEATURE_FLAG_MAINTENANCE_BANNER = False
+FEATURE_FLAG_ANNOUNCEMENT_MODAL = True
+FEATURE_FLAG_RATE_LIMITING = True
+FEATURE_FLAG_IP_BLOCKING = True
+FEATURE_FLAG_CAPTCHA_VERIFICATION = False
+CAPTCHA_PROVIDER = "none"
+CAPTCHA_SITE_KEY = ""
+CAPTCHA_SECRET_KEY = ""
+TERMS_OF_SERVICE_VERSION = "1.0.0"
+PRIVACY_POLICY_VERSION = "1.0.0"
+COOKIE_POLICY_VERSION = "1.0.0"
+SYSTEM_INITIALIZED = True
