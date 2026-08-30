@@ -512,6 +512,8 @@ async def reseller_selected(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Admin only.", show_alert=True)
         return
 
+    await callback.answer()
+
     for prefix in ("reseller_selected:", "provider:", "reseller:"):
         if callback.data.startswith(prefix):
             reseller_id = callback.data.split(prefix, 1)[1]
@@ -519,7 +521,6 @@ async def reseller_selected(callback: CallbackQuery, state: FSMContext):
     else:
         reseller_id = callback.data.split(":", 1)[1]
 
-    await callback.answer()
     await _fetch_and_show_reseller_products(callback, state, reseller_id=reseller_id)
 
 
@@ -544,12 +545,20 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             db.close()
 
         if not prov:
-            await callback.message.edit_text(
-                "❌ <b>Provider Configuration Error:</b>\n"
-                "Selected provider was not found or is inactive.\n\n"
-                "Please check <b>Admin → Providers</b>.",
-                parse_mode="HTML"
-            )
+            try:
+                await callback.message.edit_text(
+                    "❌ <b>Provider Configuration Error:</b>\n"
+                    "Selected provider was not found or is inactive.\n\n"
+                    "Please check <b>Admin → Providers</b>.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await callback.message.answer(
+                    "❌ <b>Provider Configuration Error:</b>\n"
+                    "Selected provider was not found or is inactive.\n\n"
+                    "Please check <b>Admin → Providers</b>.",
+                    parse_mode="HTML"
+                )
             return
 
         base_url = prov["base_url"]
@@ -558,11 +567,18 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         prov_id = prov["id"]
 
         if not api_key or not base_url:
-            await callback.message.edit_text(
-                f"❌ <b>Provider configuration for {_esc(reseller_name)} is incomplete.</b>\n\n"
-                "Please check provider settings in Admin → Providers.",
-                parse_mode="HTML"
-            )
+            try:
+                await callback.message.edit_text(
+                    f"❌ <b>Provider configuration for {_esc(reseller_name)} is incomplete.</b>\n\n"
+                    "Please check provider settings in Admin → Providers.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await callback.message.answer(
+                    f"❌ <b>Provider configuration for {_esc(reseller_name)} is incomplete.</b>\n\n"
+                    "Please check provider settings in Admin → Providers.",
+                    parse_mode="HTML"
+                )
             return
 
         await state.update_data(
@@ -581,21 +597,37 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             manager = ResellerManager(api_key=api_key, base_url=base_url, provider_config=prov)
             products = await manager.get_products()
         except ResellerAPIError as e:
-            await callback.message.edit_text(
-                f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(str(e))}</code>\n\n"
-                "Please check API key and provider settings.",
-                parse_mode="HTML"
-            )
+            try:
+                await callback.message.edit_text(
+                    f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(str(e))}</code>\n\n"
+                    "Please check API key and provider settings.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await callback.message.answer(
+                    f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(str(e))}</code>\n\n"
+                    "Please check API key and provider settings.",
+                    parse_mode="HTML"
+                )
             return
         except Exception as e:
-            await callback.message.edit_text(
-                f"❌ <b>Connection Error:</b> Could not reach provider {_esc(reseller_name)}.\n<code>{_esc(str(e))}</code>",
-                parse_mode="HTML"
-            )
+            try:
+                await callback.message.edit_text(
+                    f"❌ <b>Connection Error:</b> Could not reach provider {_esc(reseller_name)}.\n<code>{_esc(str(e))}</code>",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await callback.message.answer(
+                    f"❌ <b>Connection Error:</b> Could not reach provider {_esc(reseller_name)}.\n<code>{_esc(str(e))}</code>",
+                    parse_mode="HTML"
+                )
             return
 
         if not isinstance(products, list) or not products:
-            await callback.message.edit_text(f"📦 No products available from {_esc(reseller_name)}.", parse_mode="HTML")
+            try:
+                await callback.message.edit_text(f"📦 No products available from {_esc(reseller_name)}.", parse_mode="HTML")
+            except Exception:
+                await callback.message.answer(f"📦 No products available from {_esc(reseller_name)}.", parse_mode="HTML")
             return
 
         logger.info(
@@ -609,54 +641,74 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         products_cache = {}
 
         for prod in products:
-            if not isinstance(prod, dict):
-                continue
-            service_id = str(prod.get("service_id") or prod.get("productId") or "").strip()
-            if not service_id:
-                continue
-            name = prod.get("name") or prod.get("title") or "Unknown Product"
-            
-            raw_price = prod.get("price")
-            if isinstance(raw_price, dict):
-                price = float(raw_price.get("amount", 0.0))
-            else:
-                try:
-                    price = float(raw_price or 0.0)
-                except (ValueError, TypeError):
-                    price = 0.0
+            try:
+                if not isinstance(prod, dict):
+                    continue
+                
+                service_id = str(
+                    prod.get("service_id") 
+                    or prod.get("productId") 
+                    or prod.get("product_id") 
+                    or prod.get("id") 
+                    or ""
+                ).strip()
 
-            raw_stock = prod.get("stock")
-            if raw_stock is not None:
-                try:
-                    stock_val = int(raw_stock)
-                except (ValueError, TypeError):
-                    stock_val = 999999
-            else:
-                raw_av = prod.get("availability")
-                if isinstance(raw_av, dict) and "available" in raw_av:
+                if not service_id:
+                    continue
+
+                name = str(prod.get("name") or prod.get("title") or "Unknown Product")
+
+                raw_price = prod.get("price")
+                if isinstance(raw_price, dict):
+                    price = float(raw_price.get("amount", 0.0))
+                else:
                     try:
-                        stock_val = int(raw_av["available"])
+                        price = float(raw_price or 0.0)
+                    except (ValueError, TypeError):
+                        price = 0.0
+
+                raw_stock = prod.get("stock")
+                if raw_stock is not None:
+                    try:
+                        stock_val = int(raw_stock)
                     except (ValueError, TypeError):
                         stock_val = 999999
                 else:
-                    stock_val = 999999
+                    raw_av = prod.get("availability")
+                    if isinstance(raw_av, dict) and "available" in raw_av:
+                        try:
+                            stock_val = int(raw_av["available"])
+                        except (ValueError, TypeError):
+                            stock_val = 999999
+                    else:
+                        stock_val = 999999
 
-            products_cache[service_id] = prod
+                products_cache[service_id] = prod
 
-            if stock_val >= 999999:
-                stock_disp = "🟢 In Stock"
-            elif stock_val > 0:
-                stock_disp = f"🟢 {stock_val}"
-            else:
-                stock_disp = "🔴 OOS"
+                if stock_val >= 999999:
+                    stock_disp = "🟢 In Stock"
+                elif stock_val > 0:
+                    stock_disp = f"🟢 {stock_val}"
+                else:
+                    stock_disp = "🔴 OOS"
 
-            btn_text = f"{name} | Cost: ${price:.2f} | {stock_disp}"
-            buttons.append([
-                InlineKeyboardButton(
-                    text=btn_text[:64],
-                    callback_data=f"reseller_prod:{service_id}"
-                )
-            ])
+                btn_text = f"{name} | Cost: ${price:.2f} | {stock_disp}"
+                buttons.append([
+                    InlineKeyboardButton(
+                        text=btn_text[:64],
+                        callback_data=f"reseller_prod:{service_id}"
+                    )
+                ])
+            except Exception:
+                logger.exception("Skipping malformed product entry during rendering: %s", prod)
+                continue
+
+        if not products_cache:
+            try:
+                await callback.message.edit_text("No products available.", parse_mode="HTML")
+            except Exception:
+                await callback.message.answer("No products available.", parse_mode="HTML")
+            return
 
         await state.update_data(reseller_products_cache=products_cache)
 
@@ -669,16 +721,32 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-        await callback.message.edit_text(
-            "╔══════════════════════════════╗\n"
-            "║  📦 PROVIDER PRODUCTS        ║\n"
-            "╚══════════════════════════════╝\n\n"
-            f"<b>Provider:</b> {_esc(reseller_name)}\n\n"
-            "Select a product from the list below to import:\n\n"
-            "<i>Showing item | provider cost | live stock</i>",
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        try:
+            await callback.message.edit_text(
+                "╔══════════════════════════════╗\n"
+                "║  📦 PROVIDER PRODUCTS        ║\n"
+                "╚══════════════════════════════╝\n\n"
+                f"<b>Provider:</b> {_esc(reseller_name)}\n\n"
+                "Select a product from the list below to import:\n\n"
+                "<i>Showing item | provider cost | live stock</i>",
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+        except Exception:
+            logger.exception("Failed to edit Telegram message with reseller product buttons")
+            try:
+                await callback.message.answer(
+                    "╔══════════════════════════════╗\n"
+                    "║  📦 PROVIDER PRODUCTS        ║\n"
+                    "╚══════════════════════════════╝\n\n"
+                    f"<b>Provider:</b> {_esc(reseller_name)}\n\n"
+                    "Select a product from the list below to import:\n\n"
+                    "<i>Showing item | provider cost | live stock</i>",
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            except Exception:
+                pass
 
 
 @router.callback_query(F.data.startswith("reseller_prod:"))
