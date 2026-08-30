@@ -118,7 +118,7 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        is_canboso = "canboso.com" in self.base_url.lower()
+        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
 
         if raw_auth_type:
             self.auth_type = raw_auth_type
@@ -216,7 +216,8 @@ class ResellerManager:
             elif isinstance(ep_val, str):
                 return ep_val, default_method
 
-        if "canboso.com" in self.base_url.lower():
+        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        if is_canboso:
             if feature == "products":
                 return "/api/v2/telegram-buyer/products", default_method
             elif feature == "balance":
@@ -238,7 +239,8 @@ class ResellerManager:
                 return mappings[feature]
             return mappings
 
-        if "canboso.com" in self.base_url.lower() and feature == "products":
+        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
+        if is_canboso and feature == "products":
             return {
                 "service_id": "productId",
                 "name": "name",
@@ -377,7 +379,7 @@ class ResellerManager:
 
     async def get_me(self) -> dict[str, Any]:
         """Fetch account metadata from provider."""
-        is_canboso = "canboso.com" in self.base_url.lower()
+        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
         default_ep = "/api/v2/telegram-buyer/balance" if is_canboso else "/api/v1/me"
         endpoint, method = self._get_endpoint_and_method("me", default_ep, "GET")
         res = await self._request(method, endpoint, feature_name="me")
@@ -389,7 +391,7 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        is_canboso = "canboso.com" in self.base_url.lower()
+        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
 
         if is_canboso:
             default_ep = "/api/v2/telegram-buyer/balance"
@@ -433,7 +435,7 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        is_canboso = "canboso.com" in self.base_url.lower()
+        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
 
         if is_canboso:
             default_ep = "/api/v2/telegram-buyer/products"
@@ -627,7 +629,7 @@ class ResellerManager:
                 "em_store" in self.provider_id.lower()
                 or "ssondigitalworks" in self.base_url
         )
-        is_canboso = "canboso.com" in self.base_url.lower()
+        is_canboso = "canboso.com" in self.base_url.lower() or "rain_deals" in self.provider_id.lower()
 
         if is_canboso:
             default_ep = "/api/v2/telegram-buyer/purchase"
