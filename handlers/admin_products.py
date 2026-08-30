@@ -2,6 +2,7 @@ import json
 import logging
 from decimal import Decimal
 from html import escape as _esc
+import asyncio
 
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -50,8 +51,8 @@ router = Router()
 
 print("✅ admin_products imported")
 
-# In-memory guard for duplicate reseller product fetches per user/provider
-_reseller_import_locks: set[tuple[int, str]] = set()
+# Per-user per-provider asynchronous locks for preventing concurrent duplicate fetches
+_provider_fetch_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 
 # ╔══════════════════════════════════════════════════════════════╗
@@ -439,7 +440,7 @@ async def add_product_own(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ╔══════════════════════════════════════════════════════════════╗
+# ╔══════════════════════════════════════════════════════════════╝
 # ║            RESELLER IMPORT FLOW HANDLERS                     ║
 # ╚══════════════════════════════════════════════════════════════╝
 
@@ -521,15 +522,19 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
     user_id = callback.from_user.id
     lock_key = (user_id, str(reseller_id))
 
-    if lock_key in _reseller_import_locks:
+    if lock_key not in _provider_fetch_locks:
+        _provider_fetch_locks[lock_key] = asyncio.Lock()
+
+    lock = _provider_fetch_locks[lock_key]
+
+    if lock.locked():
         await callback.answer(
             "⏳ Product list is already being loaded...",
             show_alert=False,
         )
         return
 
-    _reseller_import_locks.add(lock_key)
-    try:
+    async with lock:
         db = SessionLocal()
         try:
             prov = _get_provider_by_id(db, reseller_id)
@@ -665,8 +670,6 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             reply_markup=keyboard
         )
         await callback.answer()
-    finally:
-        _reseller_import_locks.discard(lock_key)
 
 
 @router.callback_query(F.data.startswith("reseller_prod:"))
