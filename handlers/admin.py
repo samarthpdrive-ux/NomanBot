@@ -85,7 +85,7 @@ async def _safe_edit_text(message: Message, text: str, reply_markup=None, parse_
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  ADMIN PANEL KEYBOARD HELPER                                ║
+# ║  ADMIN PANEL KEYBOARD HELPER                                 ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 def _get_admin_panel_with_providers() -> InlineKeyboardMarkup:
@@ -112,7 +112,7 @@ def _get_admin_panel_with_providers() -> InlineKeyboardMarkup:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  ADMIN PANEL DASHBOARD — TERMINAL STYLE                    ║
+# ║  ADMIN PANEL DASHBOARD — TERMINAL STYLE                     ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 def _build_admin_dashboard(db, admin_name: str, admin_id: int) -> str:
@@ -162,12 +162,23 @@ def _build_admin_dashboard(db, admin_name: str, admin_id: int) -> str:
 
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  USER DASHBOARD — TERMINAL STYLE (for admin_back)          ║
+# ║  USER DASHBOARD — TERMINAL STYLE (with exact balance format) ║
 # ╚══════════════════════════════════════════════════════════════╝
 
+def _format_balance(raw_balance) -> str:
+    """Formats wallet balance to show exact fractional values without truncation."""
+    try:
+        dec_val = Decimal(str(raw_balance or 0))
+        return str(dec_val.normalize())
+    except Exception:
+        return "0"
+
+
 def _build_user_dashboard(user) -> str:
-    """Build terminal-style user dashboard."""
-    balance = float(getattr(user, 'balance_display', float(user.balance or 0)))
+    """Build terminal-style user dashboard with exact fractional balance display."""
+    balance_raw = getattr(user, 'balance_display', getattr(user, 'balance', 0))
+    balance_str = _format_balance(balance_raw)
+    
     total_orders = int(getattr(user, 'total_orders', 0) or 0)
     total_refs = int(getattr(user, 'total_referrals', 0) or 0)
     first_name = user.full_name.split()[0] if user.full_name else "user"
@@ -178,7 +189,7 @@ def _build_user_dashboard(user) -> str:
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"👋 Welcome back, {safe(first_name)}\n\n"
         "💎 Standard Plan\n\n"
-        f"💰 Wallet: ${balance:.2f}\n"
+        f"💰 Wallet: ${balance_str}\n"
         f"📦 Orders: {total_orders}\n"
         f"🎁 Rewards: {total_refs}\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -1062,15 +1073,18 @@ async def view_user(callback: CallbackQuery):
             await callback.answer("User not found.", show_alert=True)
             return
 
+        balance_raw = getattr(user, 'balance_display', getattr(user, 'balance', 0))
+        balance_str = _format_balance(balance_raw)
+
         text = (
             "╔════════════════════════════╗\n"
-            "║      👤 USER DETAILS       ║\n"
+            "║      👤 USER DETAILS        ║\n"
             "╚════════════════════════════╝\n\n"
             f"👤 <b>Name:</b> {safe(user.full_name)}\n"
             f"📝 <b>Username:</b> @{safe(user.username or 'None')}\n"
             f"🆔 <b>Telegram ID:</b> <code>{safe(str(user.telegram_id))}</code>\n\n"
             "────────────────────────────\n"
-            f"💰 <b>Balance:</b> ${float(user.balance):.2f}\n"
+            f"💰 <b>Balance:</b> ${balance_str}\n"
             f"🎁 <b>Referral Earnings:</b> ${float(user.referral_earnings):.2f}\n"
             f"👥 <b>Referrals:</b> {user.total_referrals}\n\n"
             "────────────────────────────\n"
@@ -1191,7 +1205,7 @@ async def admin_stats(callback: CallbackQuery):
 
         text = (
             "╔════════════════════════════╗\n"
-            "║      📊 STATISTICS         ║\n"
+            "║       📊 STATISTICS        ║\n"
             "╚════════════════════════════╝\n\n"
             f"👥 <b>Users:</b> {users}\n"
             f"📦 <b>Products:</b> {products}\n"
@@ -1423,7 +1437,7 @@ async def send_broadcast(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "admin_back")
 async def admin_back(callback: CallbackQuery):
-    """Back to user dashboard — terminal style, edits current message."""
+    """Back to user dashboard — terminal style, edits current message with exact balance."""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.telegram_id == callback.from_user.id).first()
