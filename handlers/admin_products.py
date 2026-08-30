@@ -507,25 +507,32 @@ async def add_product_reseller(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("reseller_selected:") | F.data.startswith("reseller:") | F.data.startswith("provider:"))
 async def reseller_selected(callback: CallbackQuery, state: FSMContext):
-    """Handle explicit reseller/provider selection."""
+    """Handle explicit reseller/provider selection with diagnostic logging and underscore support."""
     if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("❌ Admin only.", show_alert=True)
         return
 
     await callback.answer()
 
+    reseller_id = None
     for prefix in ("reseller_selected:", "provider:", "reseller:"):
         if callback.data.startswith(prefix):
             reseller_id = callback.data.split(prefix, 1)[1]
             break
-    else:
-        reseller_id = callback.data.split(":", 1)[1]
+    if not reseller_id:
+        reseller_id = callback.data.split(":", 1)[1] if ":" in callback.data else callback.data
+
+    logger.info(
+        "Diagnostic Provider Selection | callback_data=%s | extracted_provider_id=%s",
+        callback.data,
+        reseller_id
+    )
 
     await _fetch_and_show_reseller_products(callback, state, reseller_id=reseller_id)
 
 
 async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMContext, reseller_id: str | None = None):
-    """Fetch live product catalog from selected Provider API and render selection menu."""
+    """Fetch live product catalog from selected Provider API and render selection menu with diagnostics."""
     user_id = callback.from_user.id
     lock_key = (user_id, str(reseller_id))
 
@@ -545,28 +552,39 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
             db.close()
 
         if not prov:
+            logger.warning("Diagnostic Provider Config: NOT FOUND for provider_id=%s", reseller_id)
             try:
                 await callback.message.edit_text(
                     "❌ <b>Provider Configuration Error:</b>\n"
-                    "Selected provider was not found or is inactive.\n\n"
+                    f"Selected provider '{reseller_id}' was not found or is inactive.\n\n"
                     "Please check <b>Admin → Providers</b>.",
                     parse_mode="HTML"
                 )
             except Exception:
                 await callback.message.answer(
                     "❌ <b>Provider Configuration Error:</b>\n"
-                    "Selected provider was not found or is inactive.\n\n"
+                    f"Selected provider '{reseller_id}' was not found or is inactive.\n\n"
                     "Please check <b>Admin → Providers</b>.",
                     parse_mode="HTML"
                 )
             return
 
-        base_url = prov["base_url"]
-        api_key = prov["api_key"]
-        reseller_name = prov["name"]
-        prov_id = prov["id"]
+        base_url = prov.get("base_url", "")
+        api_key = prov.get("api_key", "")
+        reseller_name = prov.get("name", "Provider")
+        prov_id = prov.get("id", reseller_id)
+        auth_type = prov.get("auth_type", "query")
+
+        logger.info(
+            "Diagnostic Provider Config Found | provider_id=%s | name=%s | base_url=%s | auth_type=%s",
+            prov_id,
+            reseller_name,
+            base_url,
+            auth_type
+        )
 
         if not api_key or not base_url:
+            logger.warning("Diagnostic Provider Config Incomplete for provider_id=%s", prov_id)
             try:
                 await callback.message.edit_text(
                     f"❌ <b>Provider configuration for {_esc(reseller_name)} is incomplete.</b>\n\n"
@@ -590,13 +608,14 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         logger.info(
             "Starting reseller product import: user_id=%s provider=%s",
             user_id,
-            reseller_id,
+            prov_id,
         )
 
         try:
             manager = ResellerManager(api_key=api_key, base_url=base_url, provider_config=prov)
             products = await manager.get_products()
         except ResellerAPIError as e:
+            logger.error("Diagnostic ResellerAPIError for provider=%s: %s", prov_id, str(e))
             try:
                 await callback.message.edit_text(
                     f"❌ <b>Provider API Error ({_esc(reseller_name)}):</b>\n<code>{_esc(str(e))}</code>\n\n"
@@ -611,6 +630,7 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
                 )
             return
         except Exception as e:
+            logger.error("Diagnostic Connection Error for provider=%s: %s", prov_id, str(e))
             try:
                 await callback.message.edit_text(
                     f"❌ <b>Connection Error:</b> Could not reach provider {_esc(reseller_name)}.\n<code>{_esc(str(e))}</code>",
@@ -633,7 +653,7 @@ async def _fetch_and_show_reseller_products(callback: CallbackQuery, state: FSMC
         logger.info(
             "Completed reseller product import: user_id=%s provider=%s count=%s",
             user_id,
-            reseller_id,
+            prov_id,
             len(products),
         )
 
