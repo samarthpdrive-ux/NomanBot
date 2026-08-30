@@ -2102,7 +2102,7 @@ def convert_inr_to_usdt(inr_amount: Decimal) -> Decimal:
         return Decimal("0")
 
     # Accurate conversion: Dividing INR by USD-INR exchange rate
-    return (inr_amount / rate).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    return (inr_amount / rate).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
 
 # ================================================================
 # CREDIT USER
