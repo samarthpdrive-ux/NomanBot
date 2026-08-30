@@ -77,8 +77,8 @@ _reseller_stock_cache_time: float = 0.0
 _reseller_cache_lock = asyncio.Lock()
 RESELLER_CACHE_TTL = 30  # 30s TTL to strictly respect rate limits
 
-# Per-user per-provider asynchronous locks for preventing concurrent duplicate fetches
-_provider_fetch_locks: dict[tuple[int, str], asyncio.Lock] = {}
+# Per-user per-provider in-flight import locks
+_reseller_import_locks: set[tuple[int, str]] = set()
 
 
 def _get_reseller_credentials(reseller_id: str | int | None = None) -> dict:
@@ -1956,7 +1956,7 @@ async def show_delivery_instruction(callback: CallbackQuery):
         f"{'─' * 30}\n\n"
         f"<b>⚠️ IMPORTANT — READ CAREFULLY:</b>\n\n"
         f"<blockquote>{_esc(product.delivery_instruction)}</blockquote>\n\n"
-        f"{'═' * 30}\n\n"
+        f"{'─' * 30}\n\n"
         f"<i>💡 Please follow these instructions carefully\n"
         f"to ensure a smooth experience.</i>\n\n"
         f"<i>If you have any issues, contact support!</i>"
@@ -2342,3 +2342,116 @@ async def confirm_buy(callback: CallbackQuery, state: FSMContext):
                                                 f"<i>Thanks for sharing your link! 🙏</i>", parse_mode="HTML")
             except Exception:
                 logger.exception("Failed to notify referrer %s of commission", commission["referrer_telegram_id"])
+
+
+# ╔══════════════════════════════════════════════════════════════╗
+# ║          RESELLER PRODUCT IMPORT HANDLERS                    ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+async def _fetch_and_show_reseller_products(callback: CallbackQuery, reseller_id: str):
+    user_id = callback.from_user.id
+    lock_key = (user_id, str(reseller_id))
+
+    if lock_key in _reseller_import_locks:
+        await callback.answer("⏳ Products are already being fetched from this provider...", show_alert=True)
+        return
+
+    _reseller_import_locks.add(lock_key)
+    logger.info("IMPORT START user=%s provider=%s", user_id, reseller_id)
+
+    loading_message = await callback.message.answer("🔄 Fetching products...")
+
+    try:
+        db = SessionLocal()
+        try:
+            from handlers.admin_products import _get_provider_by_id
+            provider_config = _get_provider_by_id(db, str(reseller_id))
+        except Exception:
+            provider_config = None
+        finally:
+            db.close()
+
+        if not provider_config:
+            provider_config = _get_reseller_credentials(reseller_id)
+
+        api_key = provider_config.get("api_key")
+        base_url = provider_config.get("base_url")
+
+        if not api_key or not base_url:
+            await loading_message.edit_text("❌ Provider credentials not configured properly.")
+            return
+
+        manager = ResellerManager(
+            api_key=api_key,
+            base_url=base_url,
+            provider_config=provider_config
+        )
+
+        logger.info("API REQUEST user=%s provider=%s", user_id, reseller_id)
+        reseller_data = await _call_reseller_get_products(manager)
+        logger.info("API RESPONSE user=%s provider=%s", user_id, reseller_id)
+
+        services = []
+        if isinstance(reseller_data, list):
+            services = reseller_data
+        elif isinstance(reseller_data, dict):
+            services = (
+                reseller_data.get("services", [])
+                or reseller_data.get("products", [])
+                or reseller_data.get("data", [])
+            )
+
+        if not services:
+            await loading_message.edit_text("📭 No products found from this provider.")
+            return
+
+        text = (
+            f"🔗 <b>RESELLER PRODUCTS</b>\n\n"
+            f"<b>Provider:</b> {provider_config.get('name', 'Reseller')}\n"
+            f"<b>Available Items:</b> {len(services)}\n\n"
+            f"{_divider('─', 28)}\n\n"
+            f"<i>Select a product below to import or view:</i>"
+        )
+
+        keyboard = []
+        for s in services[:15]:
+            if isinstance(s, dict):
+                sid = s.get("service_id") or s.get("id") or "0"
+                sname = s.get("name") or s.get("title") or "Product"
+                sprice = s.get("rate") or s.get("price") or "0.00"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        text=f"📦 {sname} — ${float(sprice):.2f}",
+                        callback_data=f"import_prov_{reseller_id}_{sid}",
+                        style="primary"
+                    )
+                ])
+
+        keyboard.append([
+            InlineKeyboardButton(text="🔙 Back to Providers", callback_data="admin_reseller_providers", style="primary"),
+            InlineKeyboardButton(text="🏠 Main Menu", callback_data="main_menu", style="primary")
+        ])
+
+        await loading_message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+    except Exception as e:
+        logger.exception("Error fetching reseller products for provider %s", reseller_id)
+        try:
+            await loading_message.edit_text(f"❌ Error fetching products: {str(e)}")
+        except Exception:
+            pass
+    finally:
+        _reseller_import_locks.discard(lock_key)
+        logger.info("IMPORT END user=%s provider=%s", user_id, reseller_id)
+
+
+@router.callback_query(F.data.startswith("reseller:") | F.data.startswith("provider:"))
+async def reseller_selected(callback: CallbackQuery):
+    await callback.answer()
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    parts = callback.data.split(":", 1)
+    if len(parts) < 2:
+        return
+    reseller_id = parts[1]
+    await _fetch_and_show_reseller_products(callback, reseller_id)
