@@ -1,3 +1,5 @@
+# services/deposit_checker.py
+
 """
 services/deposit_checker.py
 
@@ -43,7 +45,7 @@ Binance Pay:
 """
 
 from __future__ import annotations
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
 import asyncio
 import email
 import hashlib
@@ -55,7 +57,7 @@ import time as time_module
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from email.header import decode_header
 from typing import Optional, Union
 
@@ -358,12 +360,12 @@ try:
             getattr(
                 config,
                 "DEPOSIT_AMOUNT_TOLERANCE",
-                "0.01",
+                "0.000001",
             )
         )
     )
 except (InvalidOperation, ValueError):
-    AMOUNT_TOLERANCE = Decimal("0.01")
+    AMOUNT_TOLERANCE = Decimal("0.000001")
 
 
 try:
@@ -2012,10 +2014,6 @@ async def verify_binance_pay_order(
 
 
 # ================================================================
-# INR / UPI CONVERSION
-# ================================================================
-
-# ================================================================
 # INR / UPI CONVERSION (CurrencyAPI Multi-Key Integration)
 # ================================================================
 
@@ -2027,22 +2025,21 @@ _usdt_inr_rate_cache = {
 
 _current_api_key_index = 0
 
-
 def _get_usdt_inr_rate() -> Decimal:
     global _current_api_key_index
     now = time_module.time()
     cache = _usdt_inr_rate_cache
 
     if (
-            cache["rate"] is not None
-            and cache["last_updated"] is not None
-            and (now - cache["last_updated"]) < cache["ttl_seconds"]
+        cache["rate"] is not None
+        and cache["last_updated"] is not None
+        and (now - cache["last_updated"]) < cache["ttl_seconds"]
     ):
         return cache["rate"]
 
     api_keys = getattr(config, "CURRENCY_API_KEYS", [])
     base_url = getattr(config, "CURRENCY_API_URL", "https://api.currencyapi.com/v3/latest")
-
+    
     # Try CurrencyAPI keys first if available
     if api_keys:
         num_keys = len(api_keys)
@@ -2058,12 +2055,12 @@ def _get_usdt_inr_rate() -> Decimal:
                     },
                     timeout=getattr(config, "CURRENCY_REQUEST_TIMEOUT", 10)
                 )
-
+                
                 if response.status_code == 200:
                     data = response.json()
                     inr_data = data.get("data", {}).get("INR", {})
                     rate_val = inr_data.get("value")
-
+                    
                     if rate_val:
                         rate = Decimal(str(rate_val))
                         if rate > 0:
@@ -2071,12 +2068,10 @@ def _get_usdt_inr_rate() -> Decimal:
                             cache["last_updated"] = now
                             return rate
                 elif response.status_code in (401, 403, 429) and getattr(config, "CURRENCY_ROTATE_KEYS_ON_ERROR", True):
-                    # Rotate key on rate limit or auth error
                     _current_api_key_index = (_current_api_key_index + 1) % num_keys
             except Exception:
                 pass
-
-            # Move to next key for subsequent attempts if rotate is enabled
+            
             if getattr(config, "CURRENCY_ROTATE_KEYS_ON_ERROR", True):
                 _current_api_key_index = (_current_api_key_index + 1) % num_keys
 
@@ -2092,7 +2087,6 @@ def _get_usdt_inr_rate() -> Decimal:
         except Exception:
             pass
 
-    # Fallback rate configured in config.py
     return Decimal(str(getattr(config, "UPI_USDT_INR_RATE", 95.0)))
 
 
@@ -2101,8 +2095,11 @@ def convert_inr_to_usdt(inr_amount: Decimal) -> Decimal:
     if rate <= 0:
         return Decimal("0")
 
-    # Accurate conversion: Dividing INR by USD-INR exchange rate
-    return (inr_amount / rate).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
+    return (inr_amount / rate).quantize(
+        Decimal("0.00000001"),
+        rounding=ROUND_HALF_UP,
+    )
+
 
 # ================================================================
 # CREDIT USER
@@ -2644,12 +2641,6 @@ async def verify_deposit(
                 attempts,
                 MAX_CHECK_ATTEMPTS,
             )
-
-            # IMPORTANT:
-            # Never mark a crypto deposit failed simply because
-            # RPC/Binance is slow.
-            #
-            # Keep it pending.
 
             if result_info is not None:
                 result_info[
