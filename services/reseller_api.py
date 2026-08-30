@@ -37,6 +37,7 @@ class ResellerAPI:
         timeout: int = 15,
         auth_type: str | None = None,
         auth_header: str | None = None,
+        auth_query_param: str | None = None,
         products_endpoint: str | None = None,
         balance_endpoint: str | None = None,
         order_endpoint: str | None = None,
@@ -55,8 +56,9 @@ class ResellerAPI:
 
         is_canboso = "canboso.com" in self.base_url.lower()
 
-        self.auth_type = auth_type or ("bearer" if is_canboso else "header")
+        self.auth_type = auth_type or ("query" if is_canboso else "header")
         self.auth_header = auth_header or "X-API-Key"
+        self.auth_query_param = auth_query_param or "key"
 
         if is_canboso:
             self.products_endpoint = products_endpoint or "/api/v2/telegram-buyer/products"
@@ -80,6 +82,8 @@ class ResellerAPI:
 
         if self.auth_type.lower() == "bearer":
             headers["Authorization"] = f"Bearer {self.api_key}"
+        elif self.auth_type.lower() == "query":
+            pass
         else:
             headers[self.auth_header] = self.api_key
 
@@ -95,6 +99,10 @@ class ResellerAPI:
     ) -> Any:
 
         url = f"{self.base_url}{endpoint}"
+        req_params = dict(params or {})
+
+        if self.auth_type.lower() == "query":
+            req_params[self.auth_query_param] = self.api_key
 
         try:
             async with aiohttp.ClientSession(
@@ -106,14 +114,29 @@ class ResellerAPI:
                     url,
                     headers=self._headers(),
                     json=json_data,
-                    params=params,
+                    params=req_params if req_params else None,
                 ) as response:
 
                     text = await response.text()
+                    sanitized_text = text
+                    if self.api_key and len(self.api_key) > 3:
+                        sanitized_text = text.replace(self.api_key, "***REDACTED***")
 
                     if response.status >= 400:
+                        clean_detail = sanitized_text
+                        try:
+                            parsed_json = json.loads(text)
+                            if isinstance(parsed_json, dict):
+                                clean_detail = (
+                                    parsed_json.get("message")
+                                    or parsed_json.get("detail")
+                                    or parsed_json.get("error")
+                                    or sanitized_text
+                                )
+                        except Exception:
+                            pass
                         raise ResellerAPIError(
-                            f"HTTP {response.status}: {text[:500]}"
+                            f"HTTP {response.status}: {clean_detail}"
                         )
 
                     try:
@@ -122,11 +145,13 @@ class ResellerAPI:
                         )
                     except Exception as exc:
                         raise ResellerAPIError(
-                            f"Invalid JSON response: {text[:500]}"
+                            f"Invalid JSON response: {sanitized_text[:500]}"
                         ) from exc
 
                     return data
 
+        except ResellerAPIError:
+            raise
         except aiohttp.ClientError as exc:
             logger.exception(
                 "Reseller API request failed: %s",
@@ -152,7 +177,7 @@ class ResellerAPI:
             self.balance_endpoint,
         )
         if isinstance(data, dict):
-            for key in ("balance", "funds", "credits", "wallet", "amount", "user_balance"):
+            for key in ("balance", "funds", "credits", "wallet", "amount", "user_balance", "walletBalance"):
                 if key in data:
                     return data[key]
             return data.get("data", data)
@@ -168,7 +193,7 @@ class ResellerAPI:
         if isinstance(data, list):
             items_list = data
         elif isinstance(data, dict):
-            for key in ("services", "products", "items", "data"):
+            for key in ("products", "services", "items", "data"):
                 val = data.get(key)
                 if isinstance(val, list):
                     items_list = val
@@ -190,15 +215,19 @@ class ResellerAPI:
                 continue
             product = dict(item)
             if "service_id" not in product:
-                for id_key in ("id", "product_id", "service", "code"):
+                for id_key in ("productId", "id", "product_id", "service", "code"):
                     if id_key in product:
                         product["service_id"] = product[id_key]
                         break
             if "name" not in product:
-                for name_key in ("title", "product_name", "service_name"):
+                for name_key in ("name", "title", "product_name", "service_name"):
                     if name_key in product:
                         product["name"] = product[name_key]
                         break
+            if "price" not in product or isinstance(product.get("price"), dict):
+                price_obj = product.get("price")
+                if isinstance(price_obj, dict) and "amount" in price_obj:
+                    product["price"] = price_obj["amount"]
             normalized.append(product)
 
         return normalized
