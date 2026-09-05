@@ -161,6 +161,31 @@ def _build_admin_dashboard(db, admin_name: str, admin_id: int) -> str:
     )
 
 
+def _load_admin_dashboard(admin_name: str, admin_id: int) -> str:
+    """Run the synchronous dashboard queries outside aiogram's event loop."""
+    db = SessionLocal()
+    try:
+        return _build_admin_dashboard(db, admin_name, admin_id)
+    finally:
+        db.close()
+
+
+def _load_admin_stats() -> tuple[int, int, int, int, int, object]:
+    """Fetch dashboard statistics in a worker thread, never on the event loop."""
+    db = SessionLocal()
+    try:
+        return (
+            db.query(User).count(),
+            db.query(Product).count(),
+            db.query(Order).count(),
+            db.query(Deposit).count(),
+            db.query(Ticket).count(),
+            db.query(func.coalesce(func.sum(Order.amount), 0)).scalar(),
+        )
+    finally:
+        db.close()
+
+
 # ╔══════════════════════════════════════════════════════════════╗
 # ║  USER DASHBOARD — TERMINAL STYLE (with exact balance format) ║
 # ╚══════════════════════════════════════════════════════════════╝
@@ -242,18 +267,15 @@ async def admin_panel(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.clear()
-    db = SessionLocal()
-    try:
-        text = _build_admin_dashboard(db, callback.from_user.full_name, callback.from_user.id)
-
-        await _safe_edit_text(
-            callback.message,
-            text,
-            reply_markup=_get_admin_panel_with_providers(),
-            parse_mode="HTML"
-        )
-    finally:
-        db.close()
+    text = await asyncio.to_thread(
+        _load_admin_dashboard, callback.from_user.full_name, callback.from_user.id
+    )
+    await _safe_edit_text(
+        callback.message,
+        text,
+        reply_markup=_get_admin_panel_with_providers(),
+        parse_mode="HTML"
+    )
 
     await callback.answer()
 
@@ -1194,16 +1216,11 @@ async def admin_products(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_stats")
 async def admin_stats(callback: CallbackQuery):
-    db = SessionLocal()
-    try:
-        users = db.query(User).count()
-        products = db.query(Product).count()
-        orders = db.query(Order).count()
-        deposits = db.query(Deposit).count()
-        tickets = db.query(Ticket).count()
-        revenue = db.query(func.coalesce(func.sum(Order.amount), 0)).scalar()
+    users, products, orders, deposits, tickets, revenue = await asyncio.to_thread(
+        _load_admin_stats
+    )
 
-        text = (
+    text = (
             "╔════════════════════════════╗\n"
             "║       📊 STATISTICS        ║\n"
             "╚════════════════════════════╝\n\n"
@@ -1216,18 +1233,16 @@ async def admin_stats(callback: CallbackQuery):
             f"💵 <b>Revenue:</b> ${float(revenue or 0):.2f}"
         )
 
-        await _safe_edit_text(
-            callback.message,
-            text,
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="⬅ Back", callback_data="admin_panel")]
-                ]
-            )
+    await _safe_edit_text(
+        callback.message,
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅ Back", callback_data="admin_panel")]
+            ]
         )
-    finally:
-        db.close()
+    )
     await callback.answer()
 
 

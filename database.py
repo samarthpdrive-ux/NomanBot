@@ -38,6 +38,10 @@ from config import (
     MYSQL_PORT,
     MYSQL_DB,
     MYSQL_SSL_CA,
+    DATABASE_POOL_SIZE,
+    DATABASE_MAX_OVERFLOW,
+    DATABASE_POOL_RECYCLE,
+    DATABASE_POOL_TIMEOUT,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,12 +96,13 @@ engine = create_engine(
     # Recycle connections before an intermediary/LB/TiDB closes them.
     pool_recycle=3600,
 
-    # Small pool suitable for serverless execution.
-    pool_size=2,
-    max_overflow=3,
+    # Use the deployment-configured pool. The old fixed pool of two caused
+    # normal commands to queue behind payment checks that use the database.
+    pool_size=DATABASE_POOL_SIZE,
+    max_overflow=DATABASE_MAX_OVERFLOW,
 
     # Do not wait forever for a connection.
-    pool_timeout=30,
+    pool_timeout=DATABASE_POOL_TIMEOUT,
 
     # Roll back any unfinished transaction when a connection returns
     # to the pool.

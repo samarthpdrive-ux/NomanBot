@@ -1,10 +1,12 @@
 import logging
+import asyncio
+import time
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject, Update
 
-from config import ADMIN_IDS, CHANNEL_LINK, GROUP_LINK
+from config import ADMIN_IDS, CHANNEL_LINK, GROUP_LINK, BANNED_USER_CACHE_TTL, MEMBERSHIP_CACHE_TTL
 from database import SessionLocal
 from models.user import User
 
@@ -30,21 +32,33 @@ GROUP_USERNAME = _extract_username(GROUP_LINK)
 
 async def check_user_membership(bot, user_id: int) -> bool:
     """Return True only when the user belongs to every configured public chat."""
+    now = time.monotonic()
+    cached = _membership_cache.get(user_id)
+    if cached and now - cached[1] < MEMBERSHIP_CACHE_TTL:
+        return cached[0]
+
     chats = [chat for chat in (CHANNEL_USERNAME, GROUP_USERNAME) if chat]
     if not chats:
         logger.warning("No valid public membership chat configured; allowing access")
         return True
 
-    for chat_username in chats:
+    async def check_chat(chat_username: str) -> bool:
         try:
-            member = await bot.get_chat_member(chat_id=chat_username, user_id=user_id)
-            if member.status in ("left", "kicked"):
-                return False
+            # Do both checks concurrently and fail quickly instead of making a
+            # user wait for Telegram's full request timeout.
+            member = await asyncio.wait_for(
+                bot.get_chat_member(chat_id=chat_username, user_id=user_id), timeout=5
+            )
+            return member.status not in ("left", "kicked")
         except Exception:
             # A temporary Telegram/API configuration failure must not lock users out.
             logger.exception("Membership check failed for %s", chat_username)
+            return True
 
-    return True
+    is_member = all(await asyncio.gather(*(check_chat(chat) for chat in chats)))
+    if MEMBERSHIP_CACHE_TTL > 0:
+        _membership_cache[user_id] = (is_member, now)
+    return is_member
 
 
 def get_join_keyboard() -> InlineKeyboardMarkup:
@@ -68,6 +82,25 @@ def is_user_banned(telegram_id: int) -> bool:
         return bool(user and user[0])
     finally:
         db.close()
+
+
+# Membership and ban status do not change on every update. Keeping these
+# caches local is safe for responsiveness; ban cache duration is deliberately
+# short so administration changes become effective quickly.
+_membership_cache: dict[int, tuple[bool, float]] = {}
+_banned_user_cache: dict[int, tuple[bool, float]] = {}
+
+
+def _read_banned_user_cached(telegram_id: int) -> bool:
+    now = time.monotonic()
+    cached = _banned_user_cache.get(telegram_id)
+    if cached and now - cached[1] < BANNED_USER_CACHE_TTL:
+        return cached[0]
+
+    banned = is_user_banned(telegram_id)
+    if BANNED_USER_CACHE_TTL > 0:
+        _banned_user_cache[telegram_id] = (banned, now)
+    return banned
 
 
 # These are the ONLY callback-data prefixes a banned user can use.
@@ -122,7 +155,10 @@ class BannedUserMiddleware(BaseMiddleware):
         # middleware receives the Message/CallbackQuery itself.
         actual_event = event.event if isinstance(event, Update) else event
         from_user = getattr(actual_event, "from_user", None)
-        if not from_user or not is_user_banned(from_user.id):
+        # SQLAlchemy/PyMySQL is synchronous. Never run it directly on the
+        # asyncio event loop, otherwise one slow TiDB request freezes every
+        # command and callback for all users.
+        if not from_user or not await asyncio.to_thread(_read_banned_user_cached, from_user.id):
             return await handler(event, data)
 
         if isinstance(actual_event, CallbackQuery) and _is_banned_read_only_callback(actual_event.data):

@@ -2432,12 +2432,26 @@ async def verify_deposit(
                 )
 
             else:
+                # Do not keep a pooled TiDB connection checked out while the
+                # IMAP/network verification is running. With a small pool this
+                # used to make unrelated commands wait for the pool timeout.
+                db.close()
+                db = None
 
                 verification = (
                     await verify_upi(
                         deposit
                     )
                 )
+
+                db = SessionLocal()
+                deposit = db.get(Deposit, deposit_id)
+                if deposit is None:
+                    _clear_pending_attempts(deposit_id)
+                    return False
+                if deposit.status in ("completed", "failed"):
+                    _clear_pending_attempts(deposit.id)
+                    return deposit.status == "completed"
 
             if verification is None:
 
@@ -2526,11 +2540,25 @@ async def verify_deposit(
 
                 return False
 
+            # Binance Pay is an external request. Release the connection
+            # before awaiting it, then reload the row before changing it.
+            db.close()
+            db = None
+
             verification = (
                 await verify_binance_pay_order(
                     deposit.tx_hash
                 )
             )
+
+            db = SessionLocal()
+            deposit = db.get(Deposit, deposit_id)
+            if deposit is None:
+                _clear_pending_attempts(deposit_id)
+                return False
+            if deposit.status in ("completed", "failed"):
+                _clear_pending_attempts(deposit.id)
+                return deposit.status == "completed"
 
             if verification is None:
 
@@ -2613,6 +2641,11 @@ async def verify_deposit(
         # RPC + Binance
         # --------------------------------------------------------
 
+        # RPC and Binance history checks can take many seconds. Holding a DB
+        # connection across this await starves command handlers under load.
+        db.close()
+        db = None
+
         verification = (
             await verify_transaction(
                 chain,
@@ -2620,6 +2653,15 @@ async def verify_deposit(
                 requested_amount,
             )
         )
+
+        db = SessionLocal()
+        deposit = db.get(Deposit, deposit_id)
+        if deposit is None:
+            _clear_pending_attempts(deposit_id)
+            return False
+        if deposit.status in ("completed", "failed"):
+            _clear_pending_attempts(deposit.id)
+            return deposit.status == "completed"
 
         # --------------------------------------------------------
         # Still pending
@@ -2761,7 +2803,8 @@ async def verify_deposit(
 
     except Exception:
 
-        db.rollback()
+        if db is not None:
+            db.rollback()
 
         logger.exception(
             "Error verifying deposit"
@@ -2771,7 +2814,8 @@ async def verify_deposit(
 
     finally:
 
-        db.close()
+        if db is not None:
+            db.close()
 
 
 # ================================================================

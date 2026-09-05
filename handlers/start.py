@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import uuid
+from types import SimpleNamespace
 from datetime import datetime
 from decimal import Decimal
 from html import escape as html_escape
@@ -396,6 +397,13 @@ def _get_or_create_user(telegram_id: int, username: str, full_name: str, ref_pay
             "referral_bonus": referral_bonus,
             "referral_code": user.referral_code,
             "referred_by": getattr(user, "referred_by", None),
+            # Return the dashboard values from the same transaction. This
+            # removes the second remote database query from every /start.
+            "profile": {
+                "balance": user.balance,
+                "total_orders": user.total_orders,
+                "total_referrals": user.total_referrals,
+            },
         }
 
 
@@ -461,16 +469,10 @@ async def start_cmd(message: Message, command: CommandObject):
         )
         await message.answer(welcome_text, parse_mode="HTML", disable_web_page_preview=True)
 
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.telegram_id == telegram_id).first()
-        if user:
-            text = _build_start_welcome(user, full_name)
-            is_admin = telegram_id in ADMIN_IDS
-            keyboard = get_admin_main_menu() if is_admin else get_main_menu()
-            await message.answer(
-                text, reply_markup=keyboard, parse_mode="HTML",
-                disable_web_page_preview=True
-            )
-    finally:
-        db.close()
+    user = SimpleNamespace(**result["profile"])
+    text = _build_start_welcome(user, full_name)
+    keyboard = get_admin_main_menu() if is_admin else get_main_menu()
+    await message.answer(
+        text, reply_markup=keyboard, parse_mode="HTML",
+        disable_web_page_preview=True
+    )
